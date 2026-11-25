@@ -18,6 +18,7 @@
   --f:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--ink);font:400 13px/1.5 var(--f);letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
 button,input,select,textarea{font:inherit;color:inherit;letter-spacing:inherit}
@@ -342,7 +343,7 @@ function tasksFor(mine){
     if (mine && d.owner !== me.name) return;
     if (!isRecent(d)) return;
     if (d.flag) out.push({ d, kind: 'flag', label: '확인 필요', cls: 'b-orange', sub: d.flag });
-    if (d.stage === '계약' && !d.uploadUrl){ const n = daysSince(d.contractDate); out.push({ d, kind: 'upload', label: '업로드 대기', cls: n > 30 ? 'b-red' : 'b-blue', sub: d.contractDate ? `계약 후 ${n}일` : '계약일 미입력', n: n || 0 }); }
+    if (d.stage === '계약' && !d.uploadUrl){ const n = daysSince(d.contractDate); out.push({ d, kind: 'upload', label: '업로드 대기', cls: n > 30 ? 'b-red' : 'b-blue', sub: d.contractDate ? (n < 0 ? `계약일 ${d.contractDate}` : `계약 후 ${n}일`) : '계약일 미입력', n: n || 0 }); }
     if (d.stage === '업로드' && d.views == null) out.push({ d, kind: 'views', label: '조회수 입력', cls: 'b-grey', sub: d.uploadDate ? `업로드 ${d.uploadDate}` : '업로드일 미입력' });
   });
   return out;
@@ -649,8 +650,9 @@ function openNew(chId){
       <div class="field full"><label for="n-reason">선정 사유</label><input id="n-reason" name="reason"></div>
     </div>
     <p class="hint bad" id="n-err" style="color:var(--red);margin:10px 0 0"></p>
-  </div><div class="mf"><button type="button" class="btn" data-act="mclose">취소</button><button class="btn primary" type="submit">등록</button></div></form>`;
-  let brand = ui.brand === '전체' ? null : ui.brand, match = null;
+  </div><div class="mf"><button type="button" class="btn" data-act="mclose">취소</button><button class="btn primary" type="submit" id="n-submit">등록</button></div></form>`;
+  let brand = ui.brand === '전체' ? null : ui.brand, match = null, dupOk = false;
+  const resetDup = () => { dupOk = false; const s = $('#n-submit'); if (s) s.textContent = '등록'; const er = $('#n-err'); if (er) { er.innerHTML = ''; er.className = 'hint bad'; er.style.color = 'var(--red)'; } };
   const form = $('#newForm');
   const check = () => {
     const q = form.q.value.trim(), h = handleOf(q), nn = normName(q);
@@ -658,18 +660,28 @@ function openNew(chId){
     const box = $('#n-match');
     if (match){
       const ds = DB.deals.filter(d => d.channelId === match.id);
-      box.innerHTML = `<div class="match"><b style="font-weight:510">이미 등록된 채널: ${esc(match.name)}</b>${ds.map(d => `<div class="mrow">${brandTag(d.brand)}<span class="muted">${esc(d.stage)} · ${esc(d.owner)}</span></div>`).join('')}<div class="muted" style="font-size:12px;margin-top:4px">이 채널에 새 브랜드 협찬으로 추가돼요.</div></div>`;
+      box.innerHTML = `<div class="match"><b style="font-weight:510">이미 등록된 채널: ${esc(match.name)}</b>${ds.map(d => `<div class="mrow">${brandTag(d.brand)}<span class="muted">${esc(d.stage)} · ${esc(d.owner)}</span></div>`).join('')}<div class="muted" style="font-size:12px;margin-top:4px">이 채널 아래에 새 협찬 건으로 추가돼요.</div></div>`;
       $('#n-newch').hidden = true;
     } else { box.innerHTML = ''; $('#n-newch').hidden = false; if (!h && q && !form.name.value) {} if (h && !form.name.dataset.touched) form.name.value = h; else if (!h && !form.name.dataset.touched && !/^https?:/i.test(q)) form.name.value = q; }
   };
   form.name.oninput = () => form.name.dataset.touched = '1';
-  form.q.oninput = check; check();
-  $('#n-brand').onclick = e => { const b = e.target.closest('[data-nb]'); if (!b) return; brand = b.dataset.nb; $('#n-brand').querySelectorAll('[data-nb]').forEach(x => x.setAttribute('aria-pressed', x === b)); };
+  form.q.oninput = () => { resetDup(); check(); }; check();
+  $('#n-brand').onclick = e => { const b = e.target.closest('[data-nb]'); if (!b) return; brand = b.dataset.nb; resetDup(); $('#n-brand').querySelectorAll('[data-nb]').forEach(x => x.setAttribute('aria-pressed', x === b)); };
   form.onsubmit = async e => {
-    e.preventDefault(); const err = $('#n-err'); err.textContent = '';
+    e.preventDefault(); const err = $('#n-err'); err.textContent = ''; err.className = 'hint bad'; err.style.color = 'var(--red)';
     if (!brand) return err.textContent = '브랜드를 고르세요.';
     let ch = match;
-    if (ch){ const dup = DB.deals.find(d => d.channelId === ch.id && d.brand === brand); if (dup){ err.innerHTML = `이미 ${esc(brand)} 협찬으로 등록된 채널이에요 (${esc(dup.stage)} · ${esc(dup.owner)}). <a href="#" data-deal="${esc(dup.id)}">그 건 열기</a>`; return; } }
+    if (ch){ if (!dupOk){
+      const same = DB.deals.filter(d => d.channelId === ch.id && d.brand === brand);
+      if (same.length){
+        const activeOne = same.some(d => ['후보','컨택','협의','계약'].includes(d.stage));
+        const when = d => { const x = d.contractDate || d.uploadDate || d.createdAt; return x ? Number(x.slice(5, 7)) + '월' : '날짜 없음'; };
+        err.className = 'notice ' + (activeOne ? 'red' : 'orange'); err.style.color = '';
+        err.innerHTML = `<div><b style="font-weight:590">${activeOne ? '아직 진행 중인 ' + esc(brand) + ' 협찬이 있어요. 같은 건을 두 번 넣는 건 아닌지 확인하세요.' : '이 채널은 이미 ' + esc(brand) + ' 협찬 이력이 있어요.'}</b>${same.map(d => `<div style="margin-top:4px">${esc(d.stage)} · ${esc(d.owner)} · ${when(d)} <a href="#" data-deal="${esc(d.id)}">열기</a></div>`).join('')}<div style="margin-top:6px">재협찬이 맞으면 <b style="font-weight:590">새로 등록</b>을 누르세요.</div></div>`;
+        dupOk = true; $('#n-submit').textContent = '새로 등록';
+        return;
+      }
+    } }
     else {
       const name = form.name.value.trim(); if (!name) return err.textContent = '채널명을 입력하세요.';
       const q = form.q.value.trim();
