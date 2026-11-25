@@ -257,6 +257,11 @@ const won = n => n == null || isNaN(n) ? '—' : kfmt(n) + (Math.abs(n) >= 1e4 ?
 const big = n => n == null || isNaN(n) ? '—' : kfmt(n);
 const full = n => n == null || isNaN(n) ? '' : Math.round(n).toLocaleString('ko-KR');
 const cpv = (cost, views) => cost && views ? cost / views : null;
+// 총 비용 = 계약금 + 2차 활용비 + 인센티브 (예산 사용액 기준)
+const totalCost = d => (d.cost == null && d.secondUse == null && d.incentive == null) ? null : (d.cost || 0) + (d.secondUse || 0) + (d.incentive || 0);
+// CPV 기준 비용 = 계약금 + 인센티브 (2차 활용비는 광고 활용 권리라 제외)
+const cpvBase = d => (d.cost || 0) + (d.incentive || 0);
+const dcpv = d => cpv(cpvBase(d), d.views);
 const cpvTxt = v => v == null ? '—' : v.toFixed(1) + '원';
 const toNum = v => { if (v === '' || v == null) return null; const n = Number(String(v).replace(/[,\s원]/g, '')); return isNaN(n) ? null : n; };
 const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
@@ -270,7 +275,7 @@ const ls = { get(k){ try { return localStorage.getItem(k); } catch(e){ return nu
 function toast(msg, bad){ const t = $('#toast'); t.textContent = msg; t.className = 'toast on' + (bad ? ' bad' : ''); clearTimeout(t._h); t._h = setTimeout(() => t.className = 'toast', 2600); }
 
 /* ---------- data ---------- */
-const NUMF = ['followers','v1','v2','v3','expected','cost','views'];
+const NUMF = ['followers','v1','v2','v3','expected','cost','secondUse','incentive','views'];
 let DB = { channels: [], deals: [], budgets: {} };
 let CH = new Map();
 const me = { name: ls.get('hub.me'), code: ls.get('hub.code') };
@@ -331,7 +336,7 @@ const brandsOn = () => ui.brand === '전체' ? CONFIG.BRANDS.map(b => b.name) : 
 const inBrand = d => ui.brand === '전체' || d.brand === ui.brand;
 const matchQ = d => { if (!ui.q) return true; const c = chOf(d); const q = normName(ui.q); return normName(c.name).includes(q) || normName(c.handle).includes(q) || normName(d.owner).includes(q); };
 const budgetOf = (brand, m) => DB.budgets[brand + '|' + m] || 0;
-const usedOf = (brand, m) => DB.deals.reduce((s, d) => s + (d.brand === brand && isSpend(d) && monthOf(d) === m ? (d.cost || 0) : 0), 0);
+const usedOf = (brand, m) => DB.deals.reduce((s, d) => s + (d.brand === brand && isSpend(d) && monthOf(d) === m ? (totalCost(d) || 0) : 0), 0);
 const homeDate = d => d.contractDate || d.uploadDate || d.createdAt || '';
 function taskFrom(){ const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - (CONFIG.TASK_MONTHS - 1)); const r = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); return r > CONFIG.HOME_FROM ? r : CONFIG.HOME_FROM; }
 const isRecent = d => homeDate(d) >= taskFrom() + '-01';
@@ -415,8 +420,8 @@ function viewHome(){
   const pct = budget ? Math.round(used / budget * 100) : null;
   const active = DB.deals.filter(d => inBrand(d) && ['컨택','협의','계약'].includes(d.stage));
   const ups = DB.deals.filter(d => inBrand(d) && d.uploadDate && d.uploadDate.slice(0, 7) === m);
-  const upsV = ups.filter(d => d.views && d.cost);
-  const c = cpv(upsV.reduce((s, d) => s + d.cost, 0), upsV.reduce((s, d) => s + d.views, 0));
+  const upsV = ups.filter(d => d.views && cpvBase(d));
+  const c = cpv(upsV.reduce((s, d) => s + cpvBase(d), 0), upsV.reduce((s, d) => s + d.views, 0));
   const all = tasksFor(ui.mine);
   const kinds = [['all','전체'],['upload','업로드 대기'],['views','조회수 입력'],['flag','확인 필요']];
   let list = ui.taskKind === 'all' ? all : all.filter(t => t.kind === ui.taskKind);
@@ -447,7 +452,7 @@ function viewHome(){
 
 function dealCard(d){
   const c = chOf(d);
-  const right = isSpend(d) ? won(d.cost) : (d.expected || chAvg(c) ? '평균 ' + big(d.expected || chAvg(c)) : '');
+  const right = isSpend(d) ? won(totalCost(d)) : (d.expected || chAvg(c) ? '평균 ' + big(d.expected || chAvg(c)) : '');
   return `<div class="kcard" role="button" tabindex="0" draggable="true" data-deal="${esc(d.id)}"><div class="n1"><span>${esc(c.name)}</span>${d.flag ? '<i class="flag">확인</i>' : ''}</div>
     <div class="meta">${brandTag(d.brand)}<span class="num">${esc(right)}</span></div><div class="meta"><span>${esc(d.owner)}</span><span class="num">${c.followers ? '팔로워 ' + big(c.followers) : ''}</span></div></div>`;
 }
@@ -459,12 +464,12 @@ function viewPipeline(){
     <div class="seg" role="group" aria-label="보기"><button data-pm="board" aria-pressed="${ui.pMode === 'board'}">보드</button><button data-pm="table" aria-pressed="${ui.pMode === 'table'}">표</button></div></div></div>`;
   if (ui.pMode === 'table'){
     const rows = ds.slice(0, ui.tblLimit);
-    return head + `<div class="tbl-wrap"><table><thead><tr><th>채널</th><th>브랜드</th><th>단계</th><th>담당</th><th class="r">팔로워</th><th class="r">비용</th><th>업로드일</th><th class="r">조회수</th><th class="r">CPV</th><th>상태</th></tr></thead><tbody>
-      ${rows.map(d => { const c = chOf(d); return `<tr class="click" data-deal="${esc(d.id)}"><td><b style="font-weight:510">${esc(c.name)}</b></td><td>${brandTag(d.brand)}</td><td>${esc(d.stage)}</td><td>${esc(d.owner)}</td><td class="r num">${big(c.followers)}</td><td class="r num">${won(d.cost)}</td><td class="num">${esc(d.uploadDate || '')}</td><td class="r num">${big(d.views)}</td><td class="r num">${cpvTxt(cpv(d.cost, d.views))}</td><td>${d.flag ? '<span class="badge b-orange">확인 필요</span>' : ''}</td></tr>`; }).join('')}
+    return head + `<div class="tbl-wrap"><table><thead><tr><th>채널</th><th>브랜드</th><th>단계</th><th>담당</th><th class="r">팔로워</th><th class="r">총 비용</th><th>업로드일</th><th class="r">조회수</th><th class="r">CPV</th><th>상태</th></tr></thead><tbody>
+      ${rows.map(d => { const c = chOf(d); return `<tr class="click" data-deal="${esc(d.id)}"><td><b style="font-weight:510">${esc(c.name)}</b></td><td>${brandTag(d.brand)}</td><td>${esc(d.stage)}</td><td>${esc(d.owner)}</td><td class="r num">${big(c.followers)}</td><td class="r num">${won(totalCost(d))}</td><td class="num">${esc(d.uploadDate || '')}</td><td class="r num">${big(d.views)}</td><td class="r num">${cpvTxt(dcpv(d))}</td><td>${d.flag ? '<span class="badge b-orange">확인 필요</span>' : ''}</td></tr>`; }).join('')}
       </tbody></table></div>${ds.length > rows.length ? `<button class="more" data-act="tblmore">${(ds.length - rows.length).toLocaleString()}건 더 보기</button>` : ''}`;
   }
   return head + `<div class="board">${STAGES.map(s => {
-    const col = ds.filter(d => d.stage === s), lim = ui.colLimit[s] || 30, sum = col.reduce((a, d) => a + (d.cost || 0), 0);
+    const col = ds.filter(d => d.stage === s), lim = ui.colLimit[s] || 30, sum = col.reduce((a, d) => a + (totalCost(d) || 0), 0);
     return `<div class="col" data-stage="${s}"><div class="col-h"><b>${s}</b><span class="n num">${col.length}</span>${(s === '계약' || s === '업로드') && sum ? `<span class="s num">${won(sum)}</span>` : ''}</div>
       ${col.slice(0, lim).map(dealCard).join('')}${col.length > lim ? `<button class="more" data-colmore="${s}">${col.length - lim}건 더 보기</button>` : ''}${!col.length ? '<div class="empty" style="padding:16px 4px">여기로 끌어 옮기세요</div>' : ''}</div>`;
   }).join('')}</div>`;
@@ -475,7 +480,7 @@ function viewChannels(){
   const byCh = new Map(); DB.deals.forEach(d => { if (!byCh.has(d.channelId)) byCh.set(d.channelId, []); byCh.get(d.channelId).push(d); });
   let cs = DB.channels.filter(c => (!q || normName(c.name).includes(q) || normName(c.handle).includes(q)) && (ui.brand === '전체' || (byCh.get(c.id) || []).some(d => d.brand === ui.brand)));
   const sorters = { recent: (a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')) || String(b.id).localeCompare(String(a.id), undefined, { numeric: true }), followers: (a, b) => (b.followers || 0) - (a.followers || 0), avg: (a, b) => (chAvg(b) || 0) - (chAvg(a) || 0), cpv: (a, b) => (bestCpv(a) ?? 1e9) - (bestCpv(b) ?? 1e9) };
-  function bestCpv(c){ const v = (byCh.get(c.id) || []).map(d => cpv(d.cost, d.views)).filter(x => x != null); return v.length ? Math.min(...v) : null; }
+  function bestCpv(c){ const v = (byCh.get(c.id) || []).map(d => dcpv(d)).filter(x => x != null); return v.length ? Math.min(...v) : null; }
   cs.sort(sorters[ui.chSort]);
   const rows = cs.slice(0, ui.chLimit);
   const th = (k, l) => `<th class="r sortable" data-chsort="${k}">${l}${ui.chSort === k ? ' ↓' : ''}</th>`;
@@ -493,8 +498,8 @@ function barChart(vals, labels, fmt, color){
 function groupStats(ds, keyFn){
   const g = new Map();
   ds.forEach(d => { const k = keyFn(d); if (k == null) return; if (!g.has(k)) g.set(k, []); g.get(k).push(d); });
-  return Array.from(g, ([k, arr]) => { const m = arr.filter(d => d.views && d.cost); const ratios = arr.filter(d => d.views && d.expected).map(d => d.views / d.expected).sort((a, b) => a - b);
-    return { k, n: arr.length, cost: arr.reduce((s, d) => s + (d.cost || 0), 0), views: arr.reduce((s, d) => s + (d.views || 0), 0), cpv: cpv(m.reduce((s, d) => s + d.cost, 0), m.reduce((s, d) => s + d.views, 0)), hit: ratios.length ? ratios[Math.floor(ratios.length / 2)] : null, nr: ratios.length }; });
+  return Array.from(g, ([k, arr]) => { const m = arr.filter(d => d.views && cpvBase(d)); const ratios = arr.filter(d => d.views && d.expected).map(d => d.views / d.expected).sort((a, b) => a - b);
+    return { k, n: arr.length, cost: arr.reduce((s, d) => s + (totalCost(d) || 0), 0), views: arr.reduce((s, d) => s + (d.views || 0), 0), cpv: cpv(m.reduce((s, d) => s + cpvBase(d), 0), m.reduce((s, d) => s + d.views, 0)), hit: ratios.length ? ratios[Math.floor(ratios.length / 2)] : null, nr: ratios.length }; });
 }
 function viewPerf(){
   const ups = DB.deals.filter(d => inBrand(d) && d.stage === '업로드');
@@ -508,13 +513,13 @@ function viewPerf(){
   const byBrand = groupStats(ups, d => d.brand).sort((a, b) => b.cost - a.cost).map(r => Object.assign(r, { label: brandTag(r.k) }));
   const byType = groupStats(ups, d => chOf(d).type || '미분류').filter(r => r.n >= 3).sort((a, b) => (a.cpv ?? 1e9) - (b.cpv ?? 1e9)).map(r => Object.assign(r, { label: esc(r.k) }));
   const byOwner = groupStats(ups, d => d.owner).sort((a, b) => b.n - a.n).map(r => Object.assign(r, { label: esc(r.k) }));
-  const tc = ups.filter(d => d.views && d.cost);
+  const tc = ups.filter(d => d.views && cpvBase(d));
   return `<div class="page-h"><h1>성과</h1><span class="muted">${esc(ui.brand)} · ${CONFIG.YEAR}년 · 업로드 ${ups.length}건</span></div>
   <div class="perf-grid">
     <section class="card wide"><div class="stat-row">
-      <div><b class="num">${won(ups.reduce((s, d) => s + (d.cost || 0), 0))}</b><span>총 집행액</span></div>
+      <div><b class="num">${won(ups.reduce((s, d) => s + (totalCost(d) || 0), 0))}</b><span>총 집행액</span></div>
       <div><b class="num">${big(ups.reduce((s, d) => s + (d.views || 0), 0))}</b><span>총 조회수</span></div>
-      <div><b class="num">${cpvTxt(cpv(tc.reduce((s, d) => s + d.cost, 0), tc.reduce((s, d) => s + d.views, 0)))}</b><span>평균 CPV</span></div>
+      <div><b class="num">${cpvTxt(cpv(tc.reduce((s, d) => s + cpvBase(d), 0), tc.reduce((s, d) => s + d.views, 0)))}</b><span>평균 CPV</span></div>
       <div><b class="num">${med == null ? '—' : Math.round(med * 100) + '%'}</b><span>예상 대비 실제 조회수 (중앙값)</span></div>
       <div><b class="num">${hitRate == null ? '—' : Math.round(hitRate * 100) + '%'}</b><span>예상 조회수 달성 비율 (${ratios.length}건)</span></div>
     </div></section>
@@ -556,14 +561,15 @@ function openDeal(id, presetStage){
     <div class="sec"><h4>협찬</h4><div class="fields">
       <div class="field"><label for="f-brand">브랜드</label><select id="f-brand" name="brand">${CONFIG.BRANDS.map(b => `<option ${b.name === d.brand ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></div>
       <div class="field"><label for="f-owner">담당자</label><select id="f-owner" name="owner">${owners().map(o => `<option ${o === d.owner ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></div>
-      ${nf('cost', '비용 (원)', d.cost, 'need-cost')}${f('contractDate', '계약일', d.contractDate, 'date')}
+      ${nf('cost', '계약금 (원)', d.cost, 'need-cost')}${f('contractDate', '계약일', d.contractDate, 'date')}${nf('secondUse', '2차 활용비 (원)', d.secondUse)}${nf('incentive', '인센티브 (원)', d.incentive)}
+      <div class="field full"><div class="calc" style="margin:0"><span class="muted" style="white-space:nowrap">총 비용 · 예산 반영</span><b class="num" id="totalOut" style="text-align:right"></b></div></div>
       <div class="field full" id="budgetHint"></div>
       <div class="field full"><label for="f-reason">선정 사유</label><input id="f-reason" name="reason" value="${esc(d.reason || '')}"></div>
       <div class="field full"><label for="f-note">비고 (2차 활용, 미러링 등)</label><textarea id="f-note" name="note">${esc(d.note || '')}</textarea></div>
     </div></div>
     <div class="sec"><h4>업로드</h4><div class="fields">
       ${f('uploadUrl', '업로드 URL', d.uploadUrl, 'url', 'full need-up')}${f('uploadDate', '업로드일', d.uploadDate, 'date', 'need-up')}${nf('views', '영상 조회수', d.views)}
-    </div><div class="calc"><span class="muted">CPV</span><b class="num" id="cpvOut">${cpvTxt(cpv(d.cost, d.views))}</b></div>
+    </div><div class="calc"><span class="muted">CPV</span><b class="num" id="cpvOut">${cpvTxt(dcpv(d))}</b></div>
       ${d.uploadUrl && safeUrl(d.uploadUrl) ? `<p style="margin:8px 0 0"><a href="${esc(safeUrl(d.uploadUrl))}" target="_blank" rel="noopener">업로드 영상 열기</a></p>` : ''}</div>
     <div class="sec"><h4>채널 정보 · 선정 근거</h4><div class="fields">
       ${f('c_url', '계정 URL', c.url, 'url', 'full')}${nf('c_followers', '팔로워', c.followers)}
@@ -575,13 +581,15 @@ function openDeal(id, presetStage){
   showDrawer();
   const form = $('#dealForm');
   const upd = () => {
-    const cost = toNum(form.cost.value), views = toNum(form.views.value);
-    $('#cpvOut').textContent = cpvTxt(cpv(cost, views));
+    const base = toNum(form.cost.value), su = toNum(form.secondUse.value), inc = toNum(form.incentive.value), views = toNum(form.views.value);
+    const cost = (base == null && su == null && inc == null) ? null : (base || 0) + (su || 0) + (inc || 0);
+    $('#totalOut').innerHTML = cost == null ? '—' : won(cost) + (su || inc ? `<br><small class="muted" style="font-weight:400">계약금 ${won(base || 0)}${su ? ' + 2차 활용 ' + won(su) : ''}${inc ? ' + 인센티브 ' + won(inc) : ''}</small>` : '');
+    $('#cpvOut').textContent = cpvTxt(cpv((base || 0) + (inc || 0), views)) + (su && views ? ` · 2차 활용 포함 시 ${cpvTxt(cpv(cost, views))}` : '');
     const st = ui.drawer.stage, brand = form.brand.value;
     const m = (form.contractDate.value || form.uploadDate.value || today()).slice(0, 7);
     const hint = $('#budgetHint');
     if ((st === '계약' || st === '업로드') && cost){
-      const bu = budgetOf(brand, m), others = usedOf(brand, m) - (isSpend(d) && d.brand === brand && monthOf(d) === m ? (d.cost || 0) : 0), left = bu - others - cost;
+      const bu = budgetOf(brand, m), others = usedOf(brand, m) - (isSpend(d) && d.brand === brand && monthOf(d) === m ? (totalCost(d) || 0) : 0), left = bu - others - cost;
       hint.innerHTML = `<div class="hint ${left < 0 ? 'bad' : ''}">${esc(brand)} ${Number(m.slice(5))}월 예산 ${won(bu)} 중 이 건 포함 ${won(others + cost)} 사용 → ${left < 0 ? won(-left) + ' 초과' : '잔여 ' + won(left)}</div>`;
     } else hint.innerHTML = '';
   };
@@ -590,7 +598,7 @@ function openDeal(id, presetStage){
 }
 function stageMsg(s){
   const el = $('#stageMsg'); if (!el) return;
-  el.innerHTML = s === '계약' ? '<div class="notice orange">계약으로 옮기려면 비용과 계약일을 입력하고 저장하세요.</div>' : s === '업로드' ? '<div class="notice orange">업로드로 옮기려면 업로드 URL과 업로드일을 입력하고 저장하세요.</div>' : '';
+  el.innerHTML = s === '계약' ? '<div class="notice orange">계약으로 옮기려면 계약금과 계약일을 입력하고 저장하세요.</div>' : s === '업로드' ? '<div class="notice orange">업로드로 옮기려면 업로드 URL과 업로드일을 입력하고 저장하세요.</div>' : '';
   const first = s === '계약' ? $('#f-cost') : s === '업로드' ? $('#f-uploadUrl') : null;
   if (first) setTimeout(() => first.focus(), 220);
 }
@@ -604,7 +612,7 @@ async function saveDealForm(){
   if (st === '업로드'){ if (!v.uploadUrl) miss.push('uploadUrl'); if (!v.uploadDate) miss.push('uploadDate'); }
   if (miss.length){ miss.forEach(k => { const el = $('#f-' + k); el && el.closest('.field').classList.add('err'); }); $('#f-' + miss[0]).focus(); toast(st + ' 단계에 필요한 항목을 입력하세요', true); return; }
   const c = Object.assign({}, chOf(d));
-  const nd = Object.assign({}, d, { stage: st, brand: v.brand, owner: v.owner, cost: toNum(v.cost), contractDate: v.contractDate || null, reason: v.reason || null, note: v.note || null, uploadUrl: v.uploadUrl || null, uploadDate: v.uploadDate || null, views: toNum(v.views), expected: toNum(v.expected) });
+  const nd = Object.assign({}, d, { stage: st, brand: v.brand, owner: v.owner, cost: toNum(v.cost), secondUse: toNum(v.secondUse), incentive: toNum(v.incentive), contractDate: v.contractDate || null, reason: v.reason || null, note: v.note || null, uploadUrl: v.uploadUrl || null, uploadDate: v.uploadDate || null, views: toNum(v.views), expected: toNum(v.expected) });
   if (nd.flag === '비용 미입력' && nd.cost != null) nd.flag = null;
   const nc = Object.assign(c, { url: v.c_url || null, handle: c.handle || handleOf(v.c_url), followers: toNum(v.c_followers), type: v.c_type || null, v1: toNum(v.c_v1), v2: toNum(v.c_v2), v3: toNum(v.c_v3) });
   const btn = document.querySelector('[data-act="saveDeal"]'); btn.disabled = true;
@@ -622,7 +630,7 @@ function openChannel(id){
     <div class="row" style="margin-top:4px;gap:12px">${c.handle ? `<span class="muted">@${esc(c.handle)}</span>` : ''}${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">계정 열기</a>` : ''}</div></div>
   <div class="dr-b">
     <div class="sec"><div class="stat-row"><div><b class="num">${big(c.followers)}</b><span>팔로워</span></div><div><b class="num">${big(chAvg(c))}</b><span>평균 조회수</span></div><div><b>${esc(c.type || '—')}</b><span>유형</span></div></div></div>
-    <div class="sec"><h4>협찬 이력 ${ds.length}건</h4><ul class="hist">${ds.map(d => `<li data-deal="${esc(d.id)}">${brandTag(d.brand)}<span class="muted">${esc(d.stage)} · ${esc(d.owner)}</span><span class="num" style="margin-left:auto">${d.cost ? won(d.cost) : ''}${d.views ? ' · 조회 ' + big(d.views) + ' · CPV ' + cpvTxt(cpv(d.cost, d.views)) : ''}</span></li>`).join('') || '<li class="muted">아직 없어요</li>'}</ul></div>
+    <div class="sec"><h4>협찬 이력 ${ds.length}건</h4><ul class="hist">${ds.map(d => `<li data-deal="${esc(d.id)}">${brandTag(d.brand)}<span class="muted">${esc(d.stage)} · ${esc(d.owner)}</span><span class="num" style="margin-left:auto">${d.cost ? won(totalCost(d)) : ''}${d.views ? ' · 조회 ' + big(d.views) + ' · CPV ' + cpvTxt(dcpv(d)) : ''}</span></li>`).join('') || '<li class="muted">아직 없어요</li>'}</ul></div>
   </div>
   <div class="dr-f"><button class="btn primary" data-act="newFor" data-ch="${esc(c.id)}">이 채널로 새 협찬</button></div>`;
   showDrawer();
@@ -699,7 +707,7 @@ function closeModal(){ $('#modal').hidden = true; $('#modal').innerHTML = ''; }
 /* ---------- export ---------- */
 function exportXlsx(){
   if (typeof XLSX === 'undefined') return toast('엑셀 라이브러리를 불러오지 못했습니다', true);
-  const deals = DB.deals.map(d => { const c = chOf(d); return { 채널명: c.name, 계정: c.handle || '', 계정URL: c.url || '', 브랜드: d.brand, 담당자: d.owner, 단계: d.stage, 팔로워: c.followers, 유형: c.type || '', 예상조회수: d.expected, 선정사유: d.reason || '', 비용: d.cost, 계약일: d.contractDate || '', 업로드URL: d.uploadUrl || '', 업로드일: d.uploadDate || '', 조회수: d.views, CPV: cpv(d.cost, d.views) ? +cpv(d.cost, d.views).toFixed(2) : null, 확인필요: d.flag || '', 비고: d.note || '', 최종수정: d.updatedBy || '' }; });
+  const deals = DB.deals.map(d => { const c = chOf(d); return { 채널명: c.name, 계정: c.handle || '', 계정URL: c.url || '', 브랜드: d.brand, 담당자: d.owner, 단계: d.stage, 팔로워: c.followers, 유형: c.type || '', 예상조회수: d.expected, 선정사유: d.reason || '', 계약금: d.cost, '2차활용비': d.secondUse, 인센티브: d.incentive, 총비용: totalCost(d), 계약일: d.contractDate || '', 업로드URL: d.uploadUrl || '', 업로드일: d.uploadDate || '', 조회수: d.views, CPV: dcpv(d) ? +dcpv(d).toFixed(2) : null, 확인필요: d.flag || '', 비고: d.note || '', 최종수정: d.updatedBy || '' }; });
   const budg = CONFIG.BRANDS.map(b => { const r = { 브랜드: b.name }; CONFIG.MONTHS.forEach(m => { r[m + '월 예산'] = budgetOf(b.name, ym(m)); r[m + '월 사용'] = usedOf(b.name, ym(m)); }); return r; });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(deals), '협찬건');
