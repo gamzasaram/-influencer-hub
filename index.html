@@ -221,11 +221,13 @@ th.sortable{cursor:pointer}th.sortable:hover{color:var(--ink)}
    API_URL이 비어 있으면 "체험 모드"(이 브라우저에만 저장)로 동작합니다.
    ====================================================== */
 const CONFIG = {
-  API_URL: '',
+  API_URL: 'https://script.google.com/macros/s/AKfycbyYA2r9TyLbNhqczF1BG3F2gip2RV1-FtueN0AAtRF2qiW2tZkunsPelAoOttjxSo8L/exec',
   TEAM_CODE: 'pigeon',      // 체험 모드에서만 쓰는 접속 코드 (팀 모드에서는 Apps Script에서 확인)
   ADMIN_CODE: 'admin',      // 체험 모드 예산 수정 코드
   YEAR: 2026,
   MONTHS: [3,4,5,6,7,8,9,10,11,12],
+  HOME_FROM: '2026-11',     // 이 달 이전 건은 정리 완료 — 할 일에 절대 안 나옴
+  TASK_MONTHS: 2,           // 할 일은 최근 N개월(이번 달 포함) 건만 보여줌
   OWNERS: ['송승협','나누리','소애지','이지성','유인하','안상근','송정훈','크리앤비'],
   BRANDS: [
     {name:'피죤', color:'#3182f6'},
@@ -329,11 +331,16 @@ const inBrand = d => ui.brand === '전체' || d.brand === ui.brand;
 const matchQ = d => { if (!ui.q) return true; const c = chOf(d); const q = normName(ui.q); return normName(c.name).includes(q) || normName(c.handle).includes(q) || normName(d.owner).includes(q); };
 const budgetOf = (brand, m) => DB.budgets[brand + '|' + m] || 0;
 const usedOf = (brand, m) => DB.deals.reduce((s, d) => s + (d.brand === brand && isSpend(d) && monthOf(d) === m ? (d.cost || 0) : 0), 0);
+const homeDate = d => d.contractDate || d.uploadDate || d.createdAt || '';
+function taskFrom(){ const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - (CONFIG.TASK_MONTHS - 1)); const r = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); return r > CONFIG.HOME_FROM ? r : CONFIG.HOME_FROM; }
+const isRecent = d => homeDate(d) >= taskFrom() + '-01';
+function homeMonths(){ const out = []; let [y, m] = CONFIG.HOME_FROM.split('-').map(Number); const end = [thisMonth(), ...Object.keys(DB.budgets).map(k => k.split('|')[1])].sort().pop(); for (let i = 0; i < 36; i++){ const k = y + '-' + String(m).padStart(2, '0'); if (k > end) break; out.push(k); m++; if (m > 12){ m = 1; y++; } } return out; }
 function tasksFor(mine){
   const out = [];
   DB.deals.forEach(d => {
     if (!inBrand(d)) return;
     if (mine && d.owner !== me.name) return;
+    if (!isRecent(d)) return;
     if (d.flag) out.push({ d, kind: 'flag', label: '확인 필요', cls: 'b-orange', sub: d.flag });
     if (d.stage === '계약' && !d.uploadUrl){ const n = daysSince(d.contractDate); out.push({ d, kind: 'upload', label: '업로드 대기', cls: n > 30 ? 'b-red' : 'b-blue', sub: d.contractDate ? `계약 후 ${n}일` : '계약일 미입력', n: n || 0 }); }
     if (d.stage === '업로드' && d.views == null) out.push({ d, kind: 'views', label: '조회수 입력', cls: 'b-grey', sub: d.uploadDate ? `업로드 ${d.uploadDate}` : '업로드일 미입력' });
@@ -399,6 +406,7 @@ function shell(){
 
 /* ---------- views ---------- */
 function monthSelect(){ return `<select class="sel" id="month" aria-label="월">${CONFIG.MONTHS.map(m => `<option value="${ym(m)}" ${ym(m) === ui.month ? 'selected' : ''}>${CONFIG.YEAR}년 ${m}월</option>`).join('')}</select>`; }
+function homeMonthSelect(){ return `<select class="sel" id="month" aria-label="월">${homeMonths().map(k => `<option value="${k}" ${k === ui.month ? 'selected' : ''}>${k.slice(0, 4)}년 ${Number(k.slice(5))}월</option>`).join('')}</select>`; }
 
 function viewHome(){
   const m = ui.month, bs = brandsOn();
@@ -423,7 +431,7 @@ function viewHome(){
     <div class="card kpi"><div class="lab">${mm}월 평균 CPV</div><div class="val num">${cpvTxt(c)}</div><div class="sub">조회 1회당 비용</div></div>
   </div>
   <div class="home-grid">
-    <section class="card"><div class="card-h"><h2>할 일</h2><span class="muted num">${all.length}건</span><div class="right"><div class="seg" role="group" aria-label="범위"><button data-mine="1" aria-pressed="${ui.mine}">내 것</button><button data-mine="0" aria-pressed="${!ui.mine}">전체</button></div></div></div>
+    <section class="card"><div class="card-h"><h2>할 일</h2><span class="muted num">${all.length}건 · ${Number(taskFrom().slice(5))}월 이후</span><div class="right"><div class="seg" role="group" aria-label="범위"><button data-mine="1" aria-pressed="${ui.mine}">내 것</button><button data-mine="0" aria-pressed="${!ui.mine}">전체</button></div></div></div>
       <div class="seg" role="group" aria-label="종류" style="margin-bottom:8px">${kinds.map(([k, l]) => `<button data-tk="${k}" aria-pressed="${ui.taskKind === k}">${l} <span class="num">${k === 'all' ? all.length : all.filter(t => t.kind === k).length}</span></button>`).join('')}</div>
       <ul class="tasks">${list.length ? list.map(t => `<li><button class="task" data-deal="${esc(t.d.id)}">${brandTag(t.d.brand)}<span class="t"><b>${esc(chOf(t.d).name)}</b><span>${esc(t.sub)}${ui.mine ? '' : ' · ' + esc(t.d.owner)}</span></span><span class="badge ${t.cls}">${t.label}</span></button></li>`).join('') : `<li class="empty">${ui.mine ? '밀린 일이 없어요.' : '처리할 일이 없어요.'}</li>`}</ul>
       ${all.length > 60 && list.length === 60 ? '<p class="muted" style="margin:8px 0 0;font-size:12px">최근 60건만 보여요. 종류를 골라 좁혀 보세요.</p>' : ''}
