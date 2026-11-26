@@ -1031,10 +1031,15 @@ function vaIndexAnalyses(rows){
   }
   return index;
 }
-function vaPhotoUrl(value){
-  if (typeof value !== 'string' || !/^https:\/\/(?:[a-z0-9-]+\.)*(?:googleusercontent\.com|gstatic\.com|google\.com|googleapis\.com)\//i.test(value)) return null;
-  try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password ? u.href : null; }
-  catch (_) { return null; }
+function vaPhotoObjectUrl(result){
+  if (!result || !/^image\/(?:png|jpeg|webp|gif)$/.test(result.photoMime || '')) return null;
+  const encoded = result.photoBase64;
+  if (typeof encoded !== 'string' || !encoded.length || encoded.length > 4194304 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return null;
+  try {
+    const raw = atob(encoded);
+    const bytes = Uint8Array.from(raw, char => char.charCodeAt(0));
+    return URL.createObjectURL(new Blob([bytes], {type:result.photoMime}));
+  } catch (_) { return null; }
 }
 function vaResultBody(item){
   const a = item.analysis;
@@ -1054,14 +1059,14 @@ async function vaShowPhoto(reelId, button){
   note.textContent = '사진을 불러오는 중이에요.';
   try {
     const result = await api('videoAnalysisPhoto', { reelId });
-    const url = vaPhotoUrl(result.photoUrl);
-    if (!url) throw new Error('invalid image URL');
     if ($('#va-photo') !== panel) return;
+    const url = vaPhotoObjectUrl(result);
+    if (!url) throw new Error('invalid image payload');
     const img = document.createElement('img');
     img.alt = '이 릴스의 타임스탬프별 구간 캡처';
     img.referrerPolicy = 'no-referrer';
-    img.onload = () => { note.textContent = ''; button.hidden = true; };
-    img.onerror = () => { img.remove(); note.textContent = '사진을 표시하지 못했어요. 버튼을 다시 눌러 주세요.'; button.disabled = false; };
+    img.onload = () => { URL.revokeObjectURL(url); note.textContent = ''; button.hidden = true; };
+    img.onerror = () => { URL.revokeObjectURL(url); img.remove(); note.textContent = '사진을 표시하지 못했어요. 버튼을 다시 눌러 주세요.'; button.disabled = false; };
     panel.appendChild(img);
     img.src = url;
   } catch (_) {
