@@ -112,6 +112,7 @@ select.sel{border:1px solid var(--line2);border-radius:var(--r-ctl);background:v
 .kcard.dragging{opacity:.4}
 .kcard .n1{display:flex;align-items:center;gap:6px;font-weight:510}
 .kcard .n1 span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.kcard .meta .brand{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .kcard .meta{display:flex;justify-content:space-between;gap:6px;color:var(--muted);font-size:12px;margin-top:4px}
 .kcard .flag{flex:none;font-size:11px;font-weight:510;color:var(--orange);background:var(--orange-bg);border-radius:4px;padding:0 5px;line-height:18px;font-style:normal}
 .more{width:100%;border:0;background:none;color:var(--muted);padding:6px;cursor:pointer;border-radius:var(--r-ctl)}.more:hover{background:var(--hover);color:var(--ink)}
@@ -198,6 +199,8 @@ th.sortable{cursor:pointer}th.sortable:hover{color:var(--ink)}
 
 .delta{font-size:12px;font-weight:510;margin-left:4px}.delta.good{color:var(--green)}.delta.bad{color:var(--red)}
 .dim{opacity:.4}
+.lnk{border:0;background:none;padding:0;cursor:pointer;font:inherit;color:var(--primary);font-weight:510;text-align:left}.lnk:hover{text-decoration:underline}
+.ext-ic{color:var(--muted);margin-left:4px;font-size:12px;text-decoration:none}.ext-ic:hover{color:var(--primary)}
 .bud-link{border:0;background:none;padding:0;cursor:pointer;font:inherit;color:inherit;text-decoration:underline dotted}
 .bud-link:hover{color:var(--primary)}
 .kpis6{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:12px}
@@ -517,7 +520,7 @@ function requireAdmin(){
 const staleContacts = () => DB.deals.filter(d => d.stage === '컨택' && !d.contractDate && !d.uploadDate && String(d.createdAt || '') < CONFIG.HOME_FROM + '-01');
 
 /* ---------- ui state ---------- */
-const ui = { view: 'home', brand: '전체', q: '', period: thisMonth(), psort: 'cpv', pLimit: 60, rankAll: false, mine: true, taskKind: 'all', pMode: 'board', pOwner: '', colLimit: {}, tblLimit: 150, chLimit: 100, chSort: 'recent', admin: false, adminCode: '', drawer: null };
+const ui = { view: 'home', brand: '전체', q: '', period: thisMonth(), psort: 'cpv', pLimit: 60, rankAll: false, rankSort: 'cpv', mine: true, taskKind: 'all', pMode: 'board', pOwner: '', colLimit: {}, tblLimit: 150, chLimit: 100, chSort: 'recent', admin: false, adminCode: '', drawer: null };
 
 /* ---------- gate ---------- */
 function renderGate(err){
@@ -609,11 +612,19 @@ function viewHome(){
   </div>`;
 }
 
+// 카드용 짧은 제품명: 제품명 앞에 브랜드명이 붙어 있으면 떼고 보여줌 ("무때ZERO 욕실용" → "욕실용")
+function prodShort(d){
+  let p = String(d.product || '').trim(); if (!p) return '';
+  const b = String(d.brand || '');
+  if (b && p.toLowerCase().startsWith(b.toLowerCase())) p = p.slice(b.length).trim().replace(/^[·\-_/]\s*/, '');
+  return p || String(d.product).trim();
+}
+const brandProd = d => { const p = prodShort(d); return `<span class="brand"><i class="dot" style="background:${brandColor(d.brand)}"></i>${esc(d.brand)}${p ? `<span class="muted"> · ${esc(p)}</span>` : ''}</span>`; };
 function dealCard(d){
   const c = chOf(d);
   const right = isSpend(d) ? won(totalCost(d)) : (d.expected || chAvg(c) ? '평균 ' + big(d.expected || chAvg(c)) : '');
   return `<div class="kcard" role="button" tabindex="0" draggable="true" data-deal="${esc(d.id)}"><div class="n1"><span>${esc(c.name)}</span>${d.flag ? '<i class="flag">확인</i>' : ''}</div>
-    <div class="meta">${brandTag(d.brand)}<span class="num">${esc(right)}</span></div><div class="meta"><span>${esc(d.owner)}</span><span class="num">${c.followers ? '팔로워 ' + big(c.followers) : ''}</span></div></div>`;
+    <div class="meta">${brandProd(d)}<span class="num">${esc(right)}</span></div><div class="meta"><span>${esc(d.owner)}</span><span class="num">${c.followers ? '팔로워 ' + big(c.followers) : ''}</span></div></div>`;
 }
 function pipeDeals(){ return DB.deals.filter(d => inBrand(d) && matchQ(d) && (!ui.pOwner || d.owner === ui.pOwner) && (ui.q || inPeriodDeal(d))).sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')) || String(b.id).localeCompare(String(a.id))); }
 function viewPipeline(){
@@ -624,8 +635,8 @@ function viewPipeline(){
     <div class="seg" role="group" aria-label="보기"><button data-pm="board" aria-pressed="${ui.pMode === 'board'}">보드</button><button data-pm="table" aria-pressed="${ui.pMode === 'table'}">표</button></div></div></div>`;
   if (ui.pMode === 'table'){
     const rows = ds.slice(0, ui.tblLimit);
-    return head + `<div class="tbl-wrap"><table><thead><tr><th>채널</th><th>브랜드</th><th>단계</th><th>담당</th><th class="r">팔로워</th><th class="r">총 비용</th><th>업로드일</th><th class="r">조회수</th><th class="r">CPV</th><th>상태</th></tr></thead><tbody>
-      ${rows.map(d => { const c = chOf(d); return `<tr class="click" data-deal="${esc(d.id)}"><td><b style="font-weight:510">${esc(c.name)}</b></td><td>${brandTag(d.brand)}</td><td>${esc(d.stage)}</td><td>${esc(d.owner)}</td><td class="r num">${big(c.followers)}</td><td class="r num">${won(totalCost(d))}</td><td class="num">${esc(d.uploadDate || '')}</td><td class="r num">${big(d.views)}</td><td class="r num">${cpvTxt(dcpv(d))}</td><td>${d.flag ? '<span class="badge b-orange">확인 필요</span>' : ''}</td></tr>`; }).join('')}
+    return head + `<div class="tbl-wrap"><table><thead><tr><th>채널</th><th>브랜드</th><th>제품</th><th>단계</th><th>담당</th><th class="r">팔로워</th><th class="r">총 비용</th><th>업로드일</th><th class="r">조회수</th><th class="r">CPV</th><th>상태</th></tr></thead><tbody>
+      ${rows.map(d => { const c = chOf(d); return `<tr class="click" data-deal="${esc(d.id)}"><td><b style="font-weight:510">${esc(c.name)}</b></td><td>${brandTag(d.brand)}</td><td>${esc(prodShort(d))}</td><td>${esc(d.stage)}</td><td>${esc(d.owner)}</td><td class="r num">${big(c.followers)}</td><td class="r num">${won(totalCost(d))}</td><td class="num">${esc(d.uploadDate || '')}</td><td class="r num">${big(d.views)}</td><td class="r num">${cpvTxt(dcpv(d))}</td><td>${d.flag ? '<span class="badge b-orange">확인 필요</span>' : ''}</td></tr>`; }).join('')}
       </tbody></table></div>${ds.length > rows.length ? `<button class="more" data-act="tblmore">${(ds.length - rows.length).toLocaleString()}건 더 보기</button>` : ''}`;
   }
   return head + `<div class="board">${STAGES.map(s => {
@@ -673,7 +684,14 @@ function summarize(ds){
     cpvAll: cpv(v.reduce((s, d) => s + cpvBase(d), 0), v.reduce((s, d) => s + d.views, 0)), cpvMed: median(v.map(dcpv)),
     hit: median(ds.filter(d => d.views && d.expected).map(d => d.views / d.expected)) };
 }
-function brandCuts(){ const o = {}; CONFIG.BRANDS.forEach(b => { const v = DB.deals.filter(d => d.brand === b.name && isUp(d) && d.views && cpvBase(d)).map(dcpv); if (v.length >= 8) o[b.name] = [quant(v, .25), quant(v, .75)]; }); return o; }
+function brandCuts(){
+  const o = {};
+  if (ui.brand === '전체'){ // 여러 브랜드를 한 줄로 세울 땐 전체 기준으로 평가해야 순위와 색이 맞음
+    const v = DB.deals.filter(d => isUp(d) && d.views && cpvBase(d)).map(dcpv);
+    if (v.length >= 8){ const c = [quant(v, .25), quant(v, .75)]; CONFIG.BRANDS.forEach(b => { o[b.name] = c; }); DB.deals.forEach(d => { if (!o[d.brand]) o[d.brand] = c; }); }
+    return o;
+  }
+  CONFIG.BRANDS.forEach(b => { const v = DB.deals.filter(d => d.brand === b.name && isUp(d) && d.views && cpvBase(d)).map(dcpv); if (v.length >= 8) o[b.name] = [quant(v, .25), quant(v, .75)]; }); return o; }
 function rating(d, cuts){ const v = dcpv(d), c = cuts[d.brand]; if (v == null || !c) return ''; return v <= c[0] ? '<span class="badge b-green">우수</span>' : v >= c[1] ? '<span class="badge b-red">부진</span>' : '<span class="badge b-grey">보통</span>'; }
 function suspicious(d){ const r = [], c = chOf(d); if (d.views != null && d.views <= 1000) r.push('조회수 1,000 이하'); if (d.views && d.expected && d.views / d.expected < .05) r.push('예상의 5% 미만'); return r; }
 const isRepeat = d => DB.deals.some(x => x !== d && x.channelId === d.channelId && x.brand === d.brand && isUp(x) && x.uploadDate < d.uploadDate);
@@ -702,7 +720,16 @@ function compareText(cur, prev, plab){
   if (r < 0.9) return `, ${esc(plab)}(${cpvTxt(prev)})보다 좋아졌어요`;
   return `, ${esc(plab)}와 비슷해요`;
 }
-const vidLink = d => { const u = safeUrl(d.uploadUrl), n = esc(chOf(d).name); return u ? `<a data-ext href="${esc(u)}" target="_blank" rel="noopener">${n} ↗</a>` : n; };
+// 이름을 누르면 옆 패널(성과·영상 분석), ↗를 누르면 인스타 원본
+const vidLink = d => { const u = safeUrl(d.uploadUrl), n = esc(chOf(d).name); return `<button type="button" class="lnk" data-pv="${esc(d.id)}" title="영상 상세·분석 보기">${n}</button>${u ? `<a class="ext-ic" data-ext href="${esc(u)}" target="_blank" rel="noopener" title="인스타 원본 영상">↗</a>` : ''}`; };
+function openPerfVideo(id){
+  const item = vaRows().find(r => r.id === String(id)); if (!item) return openDeal(id);
+  ui.drawer = { type: 'pv', id: String(id) };
+  $('#drawer').innerHTML = `<div class="dr-h"><div class="row"><span class="muted" style="flex:1">영상 상세 · 분석</span><button class="btn ghost sm" data-act="close">닫기</button></div></div>
+    <div class="dr-b">${vaDetail(item)}</div>
+    <div class="dr-f"><button class="btn sm" data-deal="${esc(item.id)}">협찬 정보 수정</button></div>`;
+  showDrawer();
+}
 function viewPerf(){
   const { cur, pp, cuts, allUp, s, ps } = perfData();
   const lab = periodLabel(), plab = pp ? periodLabel(pp) : '', meds = brandMedians();
@@ -723,13 +750,17 @@ function viewPerf(){
     ${tile('CPV 한 건 기준', cpvTxt(s.cpvMed), ps ? delta(s.cpvMed, ps.cpvMed, true) : '', `협찬 한 건의 CPV 중간값. 전체 비용 ÷ 전체 조회수로 계산하면 ${cpvTxt(s.cpvAll)}${pp ? ' · 옆 %는 ' + plab + ' 대비' : ''}`)}
   </div>`;
   // 영상별 순위
-  const MAX = 100, many = withV.length > 15 && !ui.rankAll;
-  const rowOf = (d, i) => hbarRow(`<span class="rk">${i + 1}</span>${vidLink(d)}`, dcpv(d), MAX, ratingColor(d, cuts), `${cpvTxt(dcpv(d))} · ${won(totalCost(d))} / ${big(d.views)}회`, base);
-  const rankRows = !withV.length ? '<div class="empty">조회수가 입력된 업로드 건이 없어요.</div>' : many
-    ? withV.slice(0, 5).map(rowOf).join('') + `<div class="hb gap"><button class="more" data-act="rankAll">··· 중간 ${withV.length - 10}건 펼치기</button></div>` + withV.slice(-5).map((d, k) => rowOf(d, withV.length - 5 + k)).join('')
-    : withV.map(rowOf).join('') + (withV.length > 15 ? `<div class="hb gap"><button class="more" data-act="rankAll">접기</button></div>` : '');
-  const rank = `<section class="card wide"><div class="card-h"><h2>영상별 효율 순위</h2><span class="muted" style="font-size:12px">CPV 낮을수록 위 · 이름 누르면 영상 열림</span></div>
-    <div class="legend"><span><i style="background:#03b26c"></i>우수</span><span><i style="background:#c4c4c8"></i>보통</span><span><i style="background:#e42939"></i>부진</span>${base != null ? `<span><i style="width:14px;height:0;border-top:2px dashed #2a78d6;border-radius:0"></i>${esc(ui.brand)} 평소 ${cpvTxt(base)}</span>` : ''}${info('우수·부진은 그 브랜드 전체 업로드의 CPV 기준 상위·하위 25%. 100원 넘는 막대는 끝에서 잘리고 실제 값은 숫자로 보여요.')}</div>
+  const rs = ui.rankSort;
+  const rankList = rs === 'views' ? [...withV].sort((a, b) => b.views - a.views) : rs === 'cost' ? [...withV].sort((a, b) => (totalCost(a) || 0) - (totalCost(b) || 0) || dcpv(a) - dcpv(b)) : withV;
+  const metric = d => rs === 'views' ? d.views : rs === 'cost' ? (totalCost(d) || 0) : dcpv(d);
+  const MAX = rs === 'cpv' ? 100 : Math.max(1, ...rankList.map(metric)), many = rankList.length > 15 && !ui.rankAll;
+  const txt = d => rs === 'views' ? `${big(d.views)}회 · ${won(totalCost(d))} · CPV ${cpvTxt(dcpv(d))}` : rs === 'cost' ? `${won(totalCost(d))} · ${big(d.views)}회 · CPV ${cpvTxt(dcpv(d))}` : `${cpvTxt(dcpv(d))} · ${won(totalCost(d))} / ${big(d.views)}회`;
+  const rowOf = (d, i) => hbarRow(`<span class="rk">${i + 1}</span>${vidLink(d)}`, metric(d), MAX, ratingColor(d, cuts), txt(d), rs === 'cpv' ? base : null);
+  const rankRows = !rankList.length ? '<div class="empty">조회수가 입력된 업로드 건이 없어요.</div>' : many
+    ? rankList.slice(0, 5).map(rowOf).join('') + `<div class="hb gap"><button class="more" data-act="rankAll">··· 중간 ${rankList.length - 10}건 펼치기</button></div>` + rankList.slice(-5).map((d, k) => rowOf(d, rankList.length - 5 + k)).join('')
+    : rankList.map(rowOf).join('') + (rankList.length > 15 ? `<div class="hb gap"><button class="more" data-act="rankAll">접기</button></div>` : '');
+  const rank = `<section class="card wide"><div class="card-h"><h2>영상별 순위</h2><span class="muted" style="font-size:12px">이름 누르면 상세·분석 · ↗ 누르면 원본 영상</span><div class="right"><div class="seg" role="group" aria-label="순위 기준"><button data-act="rankSort" data-rs="cpv" aria-pressed="${rs === 'cpv'}">CPV 낮은 순</button><button data-act="rankSort" data-rs="views" aria-pressed="${rs === 'views'}">조회수 높은 순</button><button data-act="rankSort" data-rs="cost" aria-pressed="${rs === 'cost'}">단가 낮은 순</button></div></div></div>
+    <div class="legend"><span><i style="background:#03b26c"></i>우수</span><span><i style="background:#c4c4c8"></i>보통</span><span><i style="background:#e42939"></i>부진</span>${base != null ? `<span><i style="width:14px;height:0;border-top:2px dashed #2a78d6;border-radius:0"></i>${esc(ui.brand)} 평소 ${cpvTxt(base)}</span>` : ''}${info((single ? '우수·부진은 ' + ui.brand + ' 전체 업로드의' : '우수·부진은 모든 브랜드 업로드 전체의') + ' CPV 기준 상위·하위 25%. 색은 어떤 순서로 정렬해도 CPV 기준이에요. CPV 순에서 100원 넘는 막대는 끝에서 잘리고 실제 값은 숫자로 보여요.')}</div>
     ${rankRows}</section>`;
   // 비용 구간 (누적)
   const tiers = [['10만 원 이하', 0, 100000], ['11~30만 원', 100001, 300000], ['31~50만 원', 300001, 500000], ['50만 원 초과', 500001, 1e12]];
@@ -1120,10 +1151,12 @@ function viewVideoAnalysis(){
   const inPeriod = rows.filter(r => vaState.month === 'all' || r.month === vaState.month);
   const shown = inPeriod.filter(r => (ui.brand === '전체' || r.brand === ui.brand) && matchQ(r.d))
     .sort((a,b) => (b.date || '').localeCompare(a.date || '') || a.id.localeCompare(b.id));
+  // 조회수 순과 CPV 순을 각각 전체에서 뽑음 (조회수 상위 5개 안에서 다시 정렬하지 않음)
   const byViews = shown.filter(r => r.views != null).sort((a,b) => b.views - a.views || (b.date || '').localeCompare(a.date || '') || a.id.localeCompare(b.id)).slice(0,5);
-  const ranks = new Map(byViews.map((r,i) => [r.id,i+1]));
-  const byOrder = vaState.order === 'cpv' ? [...byViews].sort((a,b) => (a.cpv ?? Infinity) - (b.cpv ?? Infinity) || ranks.get(a.id) - ranks.get(b.id)) : byViews;
-  const picked = shown.find(r => r.id === vaState.selected) || byViews[0] || shown[0] || null;
+  const byCpv = shown.filter(r => r.cpv != null).sort((a,b) => a.cpv - b.cpv || (b.views || 0) - (a.views || 0) || a.id.localeCompare(b.id)).slice(0,5);
+  const byOrder = vaState.order === 'cpv' ? byCpv : byViews;
+  const ranks = new Map(byOrder.map((r,i) => [r.id,i+1]));
+  const picked = shown.find(r => r.id === vaState.selected) || byOrder[0] || shown[0] || null;
   vaState.selected = picked?.id ?? null;
   const completed = shown.filter(r => r.analysis).length;
   const waiting = shown.filter(r => r.link && !r.analysis).length;
@@ -1132,9 +1165,9 @@ function viewVideoAnalysis(){
   return `<div class="va-root"><div class="va-head"><div><h1>영상 분석</h1><p class="va-sub">업로드된 협찬 영상의 계정과 성과를 한곳에서 확인해요.</p></div>
     <div class="va-filters"><label for="va-month">업로드 월<select class="sel" id="va-month">${options(monthKeys,vaState.month,vaMonthLabel)}</select></label><label for="va-brand">영상 브랜드<select class="sel" id="va-brand">${options(brands,ui.brand,b => b)}</select></label></div></div>
     <div class="va-statusline va-sub"><span><strong>업로드 ${full(shown.length)}건</strong></span><span>분석 완료 ${full(completed)}건</span><span>분석 대기 ${full(waiting)}건</span><span>링크 필요·확인 ${full(linkNeeded)}건</span>${vaState.month === thisMonth() ? '<span>이번 달 · 잠정 순위</span>' : ''}</div>
-    <div class="va-layout"><section class="va-card va-rank" aria-labelledby="va-rank-title"><div class="va-card-head"><h2 id="va-rank-title">조회수 상위 5개</h2><span class="va-sub">${esc(ui.brand === '전체' ? '전체 브랜드 통합' : ui.brand)}</span></div>
+    <div class="va-layout"><section class="va-card va-rank" aria-labelledby="va-rank-title"><div class="va-card-head"><h2 id="va-rank-title">${vaState.order === 'cpv' ? 'CPV 낮은 5개' : '조회수 상위 5개'}</h2><span class="va-sub">${esc(ui.brand === '전체' ? '전체 브랜드 통합' : ui.brand)}</span></div>
     <div class="va-sort" role="group" aria-label="상위 5개 정렬"><button type="button" class="btn sm" data-act="va-sort" data-va-order="views" aria-pressed="${vaState.order === 'views'}">조회수 순</button><button type="button" class="btn sm" data-act="va-sort" data-va-order="cpv" aria-pressed="${vaState.order === 'cpv'}">CPV 낮은 순</button></div>
-    ${byOrder.length ? `<ol class="va-rows" id="va-top5">${byOrder.map(r => vaRow(r,r.id === vaState.selected,ranks.get(r.id))).join('')}</ol>` : '<p class="va-empty">이 조건에 조회수가 등록된 영상이 없어요.</p>'}<p class="va-sub va-help">허브 조회수로 선정한 후보만 다시 정렬해요. 순위 숫자는 조회수 기준이에요.</p></section>${vaDetail(picked)}</div>
+    ${byOrder.length ? `<ol class="va-rows" id="va-top5">${byOrder.map(r => vaRow(r,r.id === vaState.selected,ranks.get(r.id))).join('')}</ol>` : '<p class="va-empty">이 조건에 조회수가 등록된 영상이 없어요.</p>'}<p class="va-sub va-help">${vaState.order === 'cpv' ? '이 기간 업로드 전체에서 CPV가 가장 낮은 5개예요.' : '이 기간 업로드 전체에서 조회수가 가장 높은 5개예요.'}</p></section>${vaDetail(picked)}</div>
     <section class="va-card va-list" aria-labelledby="va-list-title"><div class="va-card-head"><h2 id="va-list-title">전체 업로드 영상</h2><span class="va-sub">${full(shown.length)}건 · 업로드일 최신순</span></div>${shown.length ? `<ul class="va-rows" id="va-all-uploads">${shown.map(r => vaRow(r,r.id === vaState.selected)).join('')}</ul>` : '<p class="va-empty">선택한 월·브랜드·검색어에 맞는 영상이 없어요.</p>'}</section></div>`;
 }
 function vaBind(){
@@ -1178,17 +1211,19 @@ function bindBoard(){
 }
 document.addEventListener('click', async e => {
   if (e.target.closest('a[data-ext]')) return;
-  const t = e.target.closest('[data-nav],[data-brand],[data-act],[data-deal],[data-channel],[data-mine],[data-tk],[data-pm],[data-colmore],[data-chsort],[data-stage-set],[data-bud],[data-psort],[data-merge]');
+  const t = e.target.closest('[data-pv],[data-nav],[data-brand],[data-act],[data-deal],[data-channel],[data-mine],[data-tk],[data-pm],[data-colmore],[data-chsort],[data-stage-set],[data-bud],[data-psort],[data-merge]');
   if (!t) return;
   if (t.tagName === 'A') e.preventDefault();
   const ds = t.dataset;
+  if (ds.pv){ openPerfVideo(ds.pv); return; }
+  if (ds.act === 'rankSort'){ ui.rankSort = ds.rs; ui.rankAll = false; render(); return; }
   if (ds.nav){ ui.view = ds.nav; closeDrawer(); render(); $('#content').scrollTop = 0; return; }
   if (ds.brand){ ui.brand = ds.brand; ui.colLimit = {}; ui.rankAll = false; render(); return; }
   if (ds.act === 'va-sort' && ui.view === 'video'){
     vaState.order = ds.vaOrder === 'cpv' ? 'cpv' : 'views'; render();
     document.querySelector(`[data-va-order="${vaState.order}"]`)?.focus({preventScroll:true}); return;
   }
-  if (ds.act === 'va-photo' && ui.view === 'video'){ await vaShowPhoto(ds.vaReel, t); return; }
+  if (ds.act === 'va-photo' && (ui.view === 'video' || (ui.drawer && ui.drawer.type === 'pv'))){ await vaShowPhoto(ds.vaReel, t); return; }
   if (ds.act === 'va-select' && ui.view === 'video'){
     vaState.selected = ds.vaId; render();
     const detail = $('#va-detail-title'); if (detail){ detail.focus({preventScroll:true}); detail.scrollIntoView({block:'nearest'}); } return;
