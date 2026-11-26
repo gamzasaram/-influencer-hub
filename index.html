@@ -207,6 +207,28 @@ th.sortable{cursor:pointer}th.sortable:hover{color:var(--ink)}
 .mx td.best{font-weight:590;color:var(--green)}
 .ext{color:var(--ink);font-weight:510}.ext:hover{color:var(--primary)}
 .sec-note{color:var(--muted);font-size:12px;margin:8px 0 0}
+.info{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--line2);color:var(--muted);font-size:10px;font-weight:600;cursor:help;margin-left:4px;vertical-align:1px}
+.summary{background:var(--surface);border-radius:var(--r-panel);box-shadow:0 0 0 1px var(--line);padding:14px 18px;margin-bottom:12px;font-size:14px;line-height:1.9}
+.summary .ic{display:inline-block;width:20px;color:var(--muted)}
+.summary a{font-weight:510}
+.kpis4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px}
+.hb{display:grid;grid-template-columns:minmax(100px,190px) minmax(0,1fr);align-items:center;gap:10px;padding:3px 0}
+.hb .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hb .nm .rk{color:var(--muted);display:inline-block;min-width:22px;font-variant-numeric:tabular-nums}
+.hb .tr{position:relative;height:20px}
+.hb .tr i{position:absolute;left:0;top:3px;height:14px;border-radius:0 4px 4px 0;min-width:2px}
+.hb .tr span{position:absolute;top:1px;font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.hb .tr b{position:absolute;top:-3px;bottom:-3px;border-left:1.5px dashed #2a78d6;font-weight:400}
+.hb.gap{grid-template-columns:1fr;text-align:center}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);margin:0 0 8px}
+.legend span{display:inline-flex;align-items:center;gap:5px}.legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
+.hm td{text-align:center;font-variant-numeric:tabular-nums;border-radius:4px}
+.hm td:first-child{text-align:left}
+.hm td.g2{background:#d6f5e3;color:#027648}.hm td.g1{background:#f0faf6;color:#027648}.hm td.r1{background:#ffeeee;color:#d22030}.hm td.r2{background:#ffd4d6;color:#a51926}
+.hm table{border-collapse:separate;border-spacing:3px}.hm td{border-bottom:0;padding:7px 8px}
+details.full summary{cursor:pointer;color:var(--muted);padding:6px 0;list-style:none}
+details.full summary::-webkit-details-marker{display:none}
+@media (max-width:1100px){.kpis4{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:1300px){.kpis6{grid-template-columns:repeat(3,1fr)}}
 @media (max-width:1100px){.hero{grid-template-columns:1fr 1fr}.home-grid,.perf-grid{grid-template-columns:1fr}}
 @media (max-width:820px){
@@ -436,7 +458,7 @@ function requireAdmin(){
 const staleContacts = () => DB.deals.filter(d => d.stage === '컨택' && !d.contractDate && !d.uploadDate && String(d.createdAt || '') < CONFIG.HOME_FROM + '-01');
 
 /* ---------- ui state ---------- */
-const ui = { view: 'home', brand: '전체', q: '', period: thisMonth(), psort: 'cpv', pLimit: 60, mine: true, taskKind: 'all', pMode: 'board', pOwner: '', colLimit: {}, tblLimit: 150, chLimit: 100, chSort: 'recent', admin: false, adminCode: '', drawer: null };
+const ui = { view: 'home', brand: '전체', q: '', period: thisMonth(), psort: 'cpv', pLimit: 60, rankAll: false, mine: true, taskKind: 'all', pMode: 'board', pOwner: '', colLimit: {}, tblLimit: 150, chLimit: 100, chSort: 'recent', admin: false, adminCode: '', drawer: null };
 
 /* ---------- gate ---------- */
 function renderGate(err){
@@ -605,59 +627,98 @@ function perfData(){
   const allUp = DB.deals.filter(d => inBrand(d) && isUp(d));
   return { cur, prev, pp, cuts, allUp, s: summarize(cur), ps: prev ? summarize(prev) : null };
 }
+const info = txt => `<span class="info" title="${esc(txt)}">i</span>`;
+function brandMedians(){ const o = {}; CONFIG.BRANDS.forEach(b => { o[b.name] = median(DB.deals.filter(d => d.brand === b.name && isUp(d) && d.views && cpvBase(d)).map(dcpv)); }); return o; }
+const ratingColor = (d, cuts) => { const v = dcpv(d), c = cuts[d.brand]; if (v == null || !c) return '#b4b2a9'; return v <= c[0] ? '#03b26c' : v >= c[1] ? '#e42939' : '#c4c4c8'; };
+function hbarRow(label, value, max, color, text, base){
+  const w = value == null ? 0 : Math.min(value, max) / max * 68;
+  return `<div class="hb"><div class="nm">${label}</div><div class="tr"><i style="width:${w}%;background:${color}"></i><span style="left:calc(${w}% + 6px)">${text}</span>${base != null ? `<b style="left:${Math.min(base, max) / max * 68}%"></b>` : ''}</div></div>`;
+}
+function compareText(cur, prev, plab){
+  if (cur == null || !prev) return '';
+  const r = cur / prev;
+  if (r >= 1.5) return `, ${esc(plab)}(${cpvTxt(prev)})보다 ${r >= 1.95 ? Math.round(r) + '배' : r.toFixed(1) + '배'} 나빠졌어요`;
+  if (r > 1.1) return `, ${esc(plab)}(${cpvTxt(prev)})보다 나빠졌어요`;
+  if (r <= 0.67) return `, ${esc(plab)}(${cpvTxt(prev)})보다 ${(1 / r).toFixed(1)}배 좋아졌어요`;
+  if (r < 0.9) return `, ${esc(plab)}(${cpvTxt(prev)})보다 좋아졌어요`;
+  return `, ${esc(plab)}와 비슷해요`;
+}
+const vidLink = d => { const u = safeUrl(d.uploadUrl), n = esc(chOf(d).name); return u ? `<a data-ext href="${esc(u)}" target="_blank" rel="noopener">${n} ↗</a>` : n; };
 function viewPerf(){
   const { cur, pp, cuts, allUp, s, ps } = perfData();
-  const lab = periodLabel(), plab = pp ? periodLabel(pp) : '';
-  const stat = (val, label, d) => `<div class="card kpi"><div class="lab">${label}</div><div class="val num">${val}</div><div class="sub">${d || '&nbsp;'}</div></div>`;
-  const vs = cur.map(d => d.views || 0).sort((a, b) => b - a), top = Math.max(1, Math.round(vs.length * .2)), conc = s.views ? Math.round(vs.slice(0, top).reduce((a, b) => a + b, 0) / s.views * 100) : null;
-  // 인플루언서별
-  const sorters = { cpv: (a, b) => (dcpv(a) ?? 1e9) - (dcpv(b) ?? 1e9), views: (a, b) => (b.views || 0) - (a.views || 0), cost: (a, b) => (totalCost(b) || 0) - (totalCost(a) || 0), hit: (a, b) => ((b.views && b.expected) ? b.views / b.expected : -1) - ((a.views && a.expected) ? a.views / a.expected : -1), date: (a, b) => String(b.uploadDate).localeCompare(String(a.uploadDate)) };
-  const rows = [...cur].sort(sorters[ui.psort]), shown = rows.slice(0, ui.pLimit);
-  const sth = (k, l, cls = 'r') => `<th class="${cls} sortable" data-psort="${k}">${l}${ui.psort === k ? (k === 'cpv' ? ' ↑' : ' ↓') : ''}</th>`;
-  const infl = `<section class="card wide"><div class="card-h"><h2>인플루언서별 결과</h2><span class="muted num">${cur.length}건 · 업로드일 기준</span></div>
-    ${cur.length ? `<div style="overflow-x:auto"><table><thead><tr><th>채널</th>${ui.brand === '전체' ? '<th>브랜드</th>' : ''}<th>제품</th><th>담당</th><th class="r">팔로워</th><th>유형</th>${sth('date', '업로드일', '')}${sth('cost', '총 비용')}${sth('views', '조회수')}${sth('cpv', 'CPV')}${sth('hit', '예상 대비')}<th>평가</th><th></th></tr></thead><tbody>
-    ${shown.map(d => { const c = chOf(d), u = safeUrl(d.uploadUrl), sus = suspicious(d), h = d.views && d.expected ? Math.round(d.views / d.expected * 100) + '%' : '—';
-      return `<tr class="click" data-deal="${esc(d.id)}"><td>${u ? `<a class="ext" data-ext href="${esc(u)}" target="_blank" rel="noopener" title="영상 열기">${esc(c.name)} ↗</a>` : `<b style="font-weight:510">${esc(c.name)}</b>`}</td>${ui.brand === '전체' ? `<td>${brandTag(d.brand)}</td>` : ''}<td>${esc(d.product || '')}</td><td>${esc(d.owner)}</td><td class="r num">${big(c.followers)}</td><td>${esc(c.type || '')}</td><td class="num">${esc(d.uploadDate)}</td><td class="r num" title="계약금 ${full(d.cost || 0)} / 2차 활용 ${full(d.secondUse || 0)} / 인센티브 ${full(d.incentive || 0)}">${won(totalCost(d))}</td><td class="r num">${big(d.views)}</td><td class="r num">${cpvTxt(dcpv(d))}</td><td class="r num">${h}</td><td>${rating(d, cuts)}</td><td>${isRepeat(d) ? '<span class="badge b-blue">재협찬</span> ' : ''}${sus.length ? `<span class="badge b-orange" title="${esc(sus.join(', '))}">확인</span>` : ''}</td></tr>`; }).join('')}
-    </tbody></table></div>${rows.length > shown.length ? `<button class="more" data-act="pmore">${rows.length - shown.length}건 더 보기</button>` : ''}
-    <p class="sec-note">평가: 그 브랜드 전체 업로드의 CPV 기준 상위 25%는 우수, 하위 25%는 부진. "확인"은 조회수가 1,000 이하이거나 예상의 5%도 안 돼서 입력값을 다시 볼 필요가 있는 건이에요(마우스를 올리면 이유가 보여요).</p>` : '<div class="empty">이 기간에 업로드된 건이 없어요.</div>'}</section>`;
-  // 제품별
-  const prodRows = statRows(groupBy(cur, d => d.product || '미지정')).sort((a, b) => b.n - a.n);
-  const prod = `<section class="card"><div class="card-h"><h2>제품별</h2><span class="muted">${esc(lab)}</span><div class="right">${ui.admin ? '<span class="badge b-green">합치기 가능</span>' : '<button class="btn sm" data-act="unlockMerge">제품명 합치기</button>'}</div></div>
-    <div style="overflow-x:auto"><table><thead><tr><th>제품</th><th class="r">건수</th><th class="r">집행액</th><th class="r">조회수</th><th class="r">CPV 중간값</th>${ui.admin ? '<th></th>' : ''}</tr></thead><tbody>${prodRows.map(r => `<tr><td>${esc(r.k)}</td><td class="r num">${r.n}</td><td class="r num">${won(r.cost)}</td><td class="r num">${big(r.views)}</td><td class="r num">${cpvTxt(r.cpvMed)}</td>${ui.admin ? `<td>${r.k !== '미지정' && ui.brand !== '전체' ? `<button class="btn sm" data-merge="${esc(r.k)}">합치기</button>` : ''}</td>` : ''}</tr>`).join('') || '<tr><td colspan="6" class="muted">업로드 건이 없어요</td></tr>'}</tbody></table></div>
-    <p class="sec-note">제품은 이번 달부터 입력돼요. 기존 건은 "미지정"이에요.${ui.admin && ui.brand === '전체' ? ' 합치기는 위쪽에서 브랜드를 하나 고르면 보여요.' : ''}</p></section>`;
-  // 담당자별
-  const ownRows = statRows(groupBy(cur, d => d.owner)).sort((a, b) => b.n - a.n);
-  const own = `<section class="card"><div class="card-h"><h2>담당자별</h2><span class="muted">${esc(lab)}</span></div><div style="overflow-x:auto"><table><thead><tr><th>담당자</th><th class="r">건수</th><th class="r">집행액</th><th class="r">CPV 중간값</th><th class="r">예상 대비</th></tr></thead><tbody>${ownRows.map(r => `<tr><td>${esc(r.k)}</td><td class="r num">${r.n}</td><td class="r num">${won(r.cost)}</td><td class="r num">${cpvTxt(r.cpvMed)}</td><td class="r num">${r.hit == null ? '—' : Math.round(r.hit * 100) + '%'}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">업로드 건이 없어요</td></tr>'}</tbody></table></div></section>`;
-  // 브랜드 × 콘텐츠 유형 (누적)
-  const types = groupBy(allUp, d => chOf(d).type || '미분류').filter(([, ds]) => ds.length >= 5).sort((a, b) => b[1].length - a[1].length).map(([k]) => k);
-  const bs = brandsOn();
-  const mxRows = bs.map(b => { const cells = types.map(ty => { const ds = allUp.filter(d => d.brand === b && (chOf(d).type || '미분류') === ty && d.views && cpvBase(d)); return { n: ds.length, v: median(ds.map(dcpv)) }; }); const ok = cells.filter(c => c.n >= 3 && c.v != null); const best = ok.length ? Math.min(...ok.map(c => c.v)) : null; return { b, cells, best }; });
-  const mx = `<section class="card wide"><div class="card-h"><h2>브랜드 × 콘텐츠 유형</h2><span class="muted">누적 · CPV 중간값</span></div><div style="overflow-x:auto"><table class="mx"><thead><tr><th>브랜드</th>${types.map(ty => `<th>${esc(ty)}</th>`).join('')}</tr></thead><tbody>${mxRows.map(r => `<tr><td>${brandTag(r.b)}</td>${r.cells.map(c => !c.n ? '<td class="muted">—</td>' : `<td class="num ${c.n < 3 ? 'dim' : ''} ${c.n >= 3 && c.v === r.best ? 'best' : ''}">${cpvTxt(c.v)}<small>${c.n}</small></td>`).join('')}</tr>`).join('')}</tbody></table></div><p class="sec-note">작은 숫자는 건수. 초록 굵은 칸이 그 브랜드에서 가장 효율 좋은 유형, 흐린 칸은 3건 미만이라 참고만 하세요.</p></section>`;
-  // 팔로워 구간 (누적)
-  const tierOrder = ['1만 미만','1~3만','3~10만','10만 이상','미상'];
-  const tierRows = statRows(groupBy(allUp, d => tierOf(chOf(d).followers))).sort((a, b) => tierOrder.indexOf(a.k) - tierOrder.indexOf(b.k));
-  const tier = `<section class="card wide"><div class="card-h"><h2>팔로워 구간별 효율</h2><span class="muted">누적</span></div><div style="overflow-x:auto"><table><thead><tr><th>팔로워</th><th class="r">건수</th><th class="r">평균 비용</th><th class="r">CPV 중간값</th><th class="r">예상 대비</th></tr></thead><tbody>${tierRows.map(r => `<tr class="${r.n < 5 ? 'dim' : ''}"><td>${r.k}</td><td class="r num">${r.n}</td><td class="r num">${won(r.n ? r.cost / r.n : null)}</td><td class="r num">${cpvTxt(r.cpvMed)}</td><td class="r num">${r.hit == null ? '—' : Math.round(r.hit * 100) + '%'}</td></tr>`).join('')}</tbody></table></div><p class="sec-note">예상 대비: 선정할 때 적은 최근 평균 조회수 대비 실제 조회수(중간값).</p></section>`;
-  // 월별 추이
+  const lab = periodLabel(), plab = pp ? periodLabel(pp) : '', meds = brandMedians();
+  const single = ui.brand !== '전체', base = single ? meds[ui.brand] : null;
+  const withV = cur.filter(d => d.views && cpvBase(d)).sort((a, b) => dcpv(a) - dcpv(b)), noV = cur.length - withV.length;
+  // 요약 세 줄
+  const better = withV.filter(d => meds[d.brand] != null && dcpv(d) <= meds[d.brand]).length, worse = withV.length - better;
+  const sum = !cur.length ? `<div class="summary"><span class="ic">·</span>${esc(lab)}에 업로드된 건이 없어요.</div>` : `<div class="summary">
+    <div><span class="ic">①</span>${s.n}건 · ${won(s.cost)} · 한 건 기준 CPV <b style="font-weight:590">${cpvTxt(s.cpvMed)}</b>${ps ? compareText(s.cpvMed, ps.cpvMed, plab) : ''}</div>
+    ${withV.length ? `<div><span class="ic">②</span>가장 효율 좋은 영상 ${vidLink(withV[0])} ${cpvTxt(dcpv(withV[0]))}${withV.length > 1 ? ` · 가장 나쁜 영상 ${vidLink(withV[withV.length - 1])} ${cpvTxt(dcpv(withV[withV.length - 1]))}` : ''}</div>` : ''}
+    ${withV.length ? `<div><span class="ic">③</span>평소${single && base != null ? `(${cpvTxt(base)})` : ''}보다 효율 좋은 영상 ${better}건, 나쁜 영상 ${worse}건${noV ? ` · 조회수 미입력 ${noV}건` : ''}</div>` : ''}
+  </div>`;
+  const tile = (l, v, d, tip) => `<div class="card kpi"><div class="lab">${l}${tip ? info(tip) : ''}</div><div class="val num" style="font-size:24px">${v}</div><div class="sub">${d || '&nbsp;'}</div></div>`;
+  const kpis = `<div class="kpis4">
+    ${tile('업로드', s.n + '건', ps ? delta(s.n, ps.n) : '')}
+    ${tile('집행액', won(s.cost), ps ? delta(s.cost, ps.cost) : '')}
+    ${tile('총 조회수', big(s.views), ps ? delta(s.views, ps.views) : '')}
+    ${tile('CPV 한 건 기준', cpvTxt(s.cpvMed), ps ? delta(s.cpvMed, ps.cpvMed, true) : '', `협찬 한 건의 CPV 중간값. 전체 비용 ÷ 전체 조회수로 계산하면 ${cpvTxt(s.cpvAll)}${pp ? ' · 옆 %는 ' + plab + ' 대비' : ''}`)}
+  </div>`;
+  // 영상별 순위
+  const MAX = 100, many = withV.length > 15 && !ui.rankAll;
+  const rowOf = (d, i) => hbarRow(`<span class="rk">${i + 1}</span>${vidLink(d)}`, dcpv(d), MAX, ratingColor(d, cuts), `${cpvTxt(dcpv(d))} · ${won(totalCost(d))} / ${big(d.views)}회`, base);
+  const rankRows = !withV.length ? '<div class="empty">조회수가 입력된 업로드 건이 없어요.</div>' : many
+    ? withV.slice(0, 5).map(rowOf).join('') + `<div class="hb gap"><button class="more" data-act="rankAll">··· 중간 ${withV.length - 10}건 펼치기</button></div>` + withV.slice(-5).map((d, k) => rowOf(d, withV.length - 5 + k)).join('')
+    : withV.map(rowOf).join('') + (withV.length > 15 ? `<div class="hb gap"><button class="more" data-act="rankAll">접기</button></div>` : '');
+  const rank = `<section class="card wide"><div class="card-h"><h2>영상별 효율 순위</h2><span class="muted" style="font-size:12px">CPV 낮을수록 위 · 이름 누르면 영상 열림</span></div>
+    <div class="legend"><span><i style="background:#03b26c"></i>우수</span><span><i style="background:#c4c4c8"></i>보통</span><span><i style="background:#e42939"></i>부진</span>${base != null ? `<span><i style="width:14px;height:0;border-top:2px dashed #2a78d6;border-radius:0"></i>${esc(ui.brand)} 평소 ${cpvTxt(base)}</span>` : ''}${info('우수·부진은 그 브랜드 전체 업로드의 CPV 기준 상위·하위 25%. 100원 넘는 막대는 끝에서 잘리고 실제 값은 숫자로 보여요.')}</div>
+    ${rankRows}</section>`;
+  // 비용 구간 (누적)
+  const tiers = [['10만 원 이하', 0, 100000], ['11~30만 원', 100001, 300000], ['31~50만 원', 300001, 500000], ['50만 원 초과', 500001, 1e12]];
+  const tierStats = tiers.map(([l, a, b]) => { const ds = allUp.filter(d => d.views && cpvBase(d) && (totalCost(d) || 0) >= a && (totalCost(d) || 0) <= b); return { l, n: ds.length, v: median(ds.map(dcpv)) }; });
+  const tMax = Math.max(1, ...tierStats.map(x => x.v || 0)) * 1.1;
+  const tierBox = `<section class="card"><div class="card-h"><h2>비용 구간별 효율</h2><span class="muted" style="font-size:12px">누적 · 짧을수록 좋음</span>${info('총 비용(계약금+2차 활용+인센티브) 구간별 한 건 기준 CPV 중간값. 단가 협상 기준으로 쓰세요.')}</div>
+    ${tierStats.map(x => hbarRow(`${x.l} <span class="muted">${x.n}건</span>`, x.v, tMax, x.n >= 5 ? '#2a78d6' : '#9fc3ef', cpvTxt(x.v))).join('')}</section>`;
+  // 제품별 (기간)
+  const prodRows = statRows(groupBy(cur.filter(d => d.views && cpvBase(d)), d => d.product || '미지정')).sort((a, b) => (a.cpvMed ?? 1e9) - (b.cpvMed ?? 1e9));
+  const pMax = Math.max(1, ...prodRows.map(r => r.cpvMed || 0)) * 1.1;
+  const prodBox = `<section class="card"><div class="card-h"><h2>제품별</h2><span class="muted" style="font-size:12px">${esc(lab)}</span>${info('제품은 11월 말부터 입력돼요. 기존 건은 미지정이에요.')}<div class="right">${ui.admin ? '' : '<button class="btn sm" data-act="unlockMerge">제품명 합치기</button>'}</div></div>
+    ${prodRows.map(r => hbarRow(`${esc(r.k)} <span class="muted">${r.n}건</span>${ui.admin && single && r.k !== '미지정' ? ` <button class="btn sm" data-merge="${esc(r.k)}">합치기</button>` : ''}`, r.cpvMed, pMax, r.k === '미지정' ? '#c4c4c8' : '#2a78d6', cpvTxt(r.cpvMed))).join('') || '<div class="empty">업로드 건이 없어요</div>'}</section>`;
+  // 담당자별 (기간)
+  const ownRows = statRows(groupBy(cur.filter(d => d.views && cpvBase(d)), d => d.owner)).sort((a, b) => (a.cpvMed ?? 1e9) - (b.cpvMed ?? 1e9));
+  const oMax = Math.max(1, ...ownRows.map(r => r.cpvMed || 0)) * 1.1;
+  const ownBox = `<section class="card"><div class="card-h"><h2>담당자별</h2><span class="muted" style="font-size:12px">${esc(lab)} · CPV 한 건 기준</span></div>
+    ${ownRows.map(r => hbarRow(`${esc(r.k)} <span class="muted">${r.n}건</span>`, r.cpvMed, oMax, r.n >= 3 ? '#2a78d6' : '#9fc3ef', cpvTxt(r.cpvMed))).join('') || '<div class="empty">업로드 건이 없어요</div>'}</section>`;
+  // 월별 CPV 추이 (누적)
   const months = Array.from(new Set(allUp.map(d => d.uploadDate.slice(0, 7)))).sort();
-  const trend = months.map(m => ({ m, ...summarize(allUp.filter(d => d.uploadDate.slice(0, 7) === m)) }));
-  const tr = `<section class="card wide"><div class="card-h"><h2>월별 추이</h2><span class="muted">${esc(ui.brand)} · 업로드일 기준</span></div><div style="overflow-x:auto"><table class="mx"><thead><tr><th></th>${trend.map(x => `<th>${x.m.slice(2, 4)}.${Number(x.m.slice(5))}월</th>`).join('')}</tr></thead><tbody>
-    <tr><td>업로드</td>${trend.map(x => `<td class="num">${x.n}</td>`).join('')}</tr>
-    <tr><td>집행액</td>${trend.map(x => `<td class="num">${big(x.cost)}</td>`).join('')}</tr>
-    <tr><td>조회수</td>${trend.map(x => `<td class="num">${big(x.views)}</td>`).join('')}</tr>
-    <tr><td>CPV (전체)</td>${trend.map(x => `<td class="num">${cpvTxt(x.cpvAll)}</td>`).join('')}</tr>
-    <tr><td>CPV (한 건 기준)</td>${trend.map(x => `<td class="num">${cpvTxt(x.cpvMed)}</td>`).join('')}</tr>
-  </tbody></table></div></section>`;
-  return `<div class="page-h"><h1>성과</h1><span class="muted">${esc(ui.brand)} · ${esc(lab)}${pp ? ' · 비교: ' + esc(plab) : ''}</span><div class="right"><button class="btn" data-act="exportReport">리포트 엑셀</button></div></div>
-  <div class="kpis6">
-    ${stat(s.n + '건', '업로드', ps ? delta(s.n, ps.n) : '')}
-    ${stat(won(s.cost), '집행액', ps ? delta(s.cost, ps.cost) : '')}
-    ${stat(big(s.views), '총 조회수', ps ? delta(s.views, ps.views) : '')}
-    ${stat(cpvTxt(s.cpvAll), 'CPV (전체)', ps ? delta(s.cpvAll, ps.cpvAll, true) : '')}
-    ${stat(cpvTxt(s.cpvMed), 'CPV (한 건 기준)', ps ? delta(s.cpvMed, ps.cpvMed, true) : '')}
-    ${stat(s.hit == null ? '—' : Math.round(s.hit * 100) + '%', '예상 대비 실적', '')}
-  </div>
-  <p class="sec-note" style="margin:-4px 0 14px">${pp ? `옆의 %는 ${esc(plab)} 대비(CPV는 낮아질수록 초록). ` : ''}CPV (전체)는 전체 비용 ÷ 전체 조회수, 한 건 기준은 협찬 한 건의 CPV 중간값이에요.${conc != null && cur.length >= 5 ? ` 이 기간 상위 20% 영상이 조회수의 ${conc}%를 냈어요.` : ''}</p>
-  <div class="perf-grid">${infl}${prod}${own}${tier}${mx}${tr}</div>`;
+  const tv = months.map(m => median(allUp.filter(d => d.uploadDate.slice(0, 7) === m && d.views && cpvBase(d)).map(dcpv)));
+  const W = 560, H = 170, L = 34, Rr = 10, T = 18, B = 26, vmax = Math.max(1, ...tv.filter(v => v != null)) * 1.15;
+  const X = i => L + (months.length < 2 ? (W - L - Rr) / 2 : i * (W - L - Rr) / (months.length - 1)), Y = v => T + (1 - v / vmax) * (H - T - B);
+  const pts = tv.map((v, i) => v == null ? null : [X(i), Y(v), v, i]).filter(Boolean);
+  const curIdx = ui.period && !/Q/.test(ui.period) ? months.indexOf(ui.period) : -1;
+  const trend = `<section class="card"><div class="card-h"><h2>월별 CPV 추이</h2><span class="muted" style="font-size:12px">${esc(ui.brand)} · 한 건 기준 · 낮을수록 좋음</span></div>
+    ${pts.length ? `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="월별 CPV 중간값 추이">
+      ${[0, .5, 1].map(f => `<line x1="${L}" x2="${W - Rr}" y1="${Y(vmax * f)}" y2="${Y(vmax * f)}" stroke="#e5e8eb"/><text x="${L - 6}" y="${Y(vmax * f) + 4}" text-anchor="end" font-size="10.5" fill="#6e6e73">${Math.round(vmax * f)}</text>`).join('')}
+      <polyline fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="${pts.map(p => p[0] + ',' + p[1]).join(' ')}"/>
+      ${pts.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="${p[3] === curIdx ? 5.5 : 3.5}" fill="${p[3] === curIdx ? '#e42939' : '#2a78d6'}" stroke="#fff" stroke-width="1.5"/><text x="${p[0]}" y="${p[1] - 9}" text-anchor="middle" font-size="10.5" fill="#1d1d1f">${p[2].toFixed(1)}</text>`).join('')}
+      ${months.map((m, i) => `<text x="${X(i)}" y="${H - 6}" text-anchor="middle" font-size="10.5" fill="${i === curIdx ? '#e42939' : '#6e6e73'}">${Number(m.slice(5))}월</text>`).join('')}
+    </svg>` : '<div class="empty">데이터가 없어요</div>'}</section>`;
+  // 브랜드 × 콘텐츠 유형 (누적, 색칠)
+  const types = groupBy(allUp, d => chOf(d).type || '미분류').filter(([, ds]) => ds.length >= 5).sort((a, b) => b[1].length - a[1].length).map(([k]) => k);
+  const cls = (v, m) => v == null || m == null ? '' : v <= m * .6 ? 'g2' : v <= m ? 'g1' : v >= m * 2 ? 'r2' : 'r1';
+  const hm = `<section class="card wide hm"><div class="card-h"><h2>브랜드 × 콘텐츠 유형</h2><span class="muted" style="font-size:12px">누적 · CPV 한 건 기준</span>${info('초록은 그 브랜드 평소보다 효율 좋음, 빨강은 나쁨. 진할수록 차이가 커요. 흐린 칸은 3건 미만이라 참고만 하세요.')}</div>
+    <div style="overflow-x:auto"><table><thead><tr><th></th>${types.map(ty => `<th style="text-align:center">${esc(ty)}</th>`).join('')}</tr></thead><tbody>
+    ${brandsOn().map(b => `<tr><td>${brandTag(b)}</td>${types.map(ty => { const ds = allUp.filter(d => d.brand === b && (chOf(d).type || '미분류') === ty && d.views && cpvBase(d)); if (!ds.length) return '<td class="muted">·</td>'; const v = median(ds.map(dcpv)); return `<td class="${cls(v, meds[b])} ${ds.length < 3 ? 'dim' : ''}" title="${esc(b)} · ${esc(ty)} · ${ds.length}건">${cpvTxt(v)}</td>`; }).join('')}</tr>`).join('')}
+    </tbody></table></div></section>`;
+  // 전체 목록 (접힘)
+  const sorters = { cpv: (a, b) => (dcpv(a) ?? 1e9) - (dcpv(b) ?? 1e9), views: (a, b) => (b.views || 0) - (a.views || 0), cost: (a, b) => (totalCost(b) || 0) - (totalCost(a) || 0), date: (a, b) => String(b.uploadDate).localeCompare(String(a.uploadDate)) };
+  const rows = [...cur].sort(sorters[ui.psort] || sorters.cpv);
+  const sth = (k, l, c = 'r') => `<th class="${c} sortable" data-psort="${k}">${l}${ui.psort === k ? ' •' : ''}</th>`;
+  const full = cur.length ? `<section class="card wide"><details class="full" ${ui.fullOpen ? 'open' : ''}><summary data-act="toggleFull">▸ 전체 목록 보기 (${cur.length}건)</summary>
+    <div style="overflow-x:auto;margin-top:8px"><table><thead><tr><th>채널</th>${single ? '' : '<th>브랜드</th>'}<th>제품</th><th>담당</th><th>유형</th>${sth('date', '업로드일', '')}${sth('cost', '총 비용')}${sth('views', '조회수')}${sth('cpv', 'CPV')}<th>평가</th></tr></thead><tbody>
+    ${rows.slice(0, ui.pLimit).map(d => `<tr class="click" data-deal="${esc(d.id)}"><td>${vidLink(d)}</td>${single ? '' : `<td>${brandTag(d.brand)}</td>`}<td>${esc(d.product || '')}</td><td>${esc(d.owner)}</td><td>${esc(chOf(d).type || '')}</td><td class="num">${esc(d.uploadDate)}</td><td class="r num">${won(totalCost(d))}</td><td class="r num">${big(d.views)}</td><td class="r num">${cpvTxt(dcpv(d))}</td><td>${rating(d, cuts)}${isRepeat(d) ? ' <span class="badge b-blue">재협찬</span>' : ''}</td></tr>`).join('')}
+    </tbody></table></div>${rows.length > ui.pLimit ? `<button class="more" data-act="pmore">${rows.length - ui.pLimit}건 더 보기</button>` : ''}</details></section>` : '';
+  return `<div class="page-h"><h1>성과</h1><span class="muted">${esc(ui.brand)} · ${esc(lab)}${pp ? ' · 비교 ' + esc(plab) : ''}</span><div class="right"><button class="btn" data-act="exportReport">리포트 엑셀</button></div></div>
+  ${sum}${kpis}<div class="perf-grid">${rank}${tierBox}${prodBox}${ownBox}${trend}${hm}${full}</div>`;
 }
 function exportReport(){
   if (typeof XLSX === 'undefined') return toast('엑셀 라이브러리를 불러오지 못했습니다', true);
@@ -882,7 +943,7 @@ function render(){
   const t = tasksFor(true).length; const ce = $('#cnt-home'); if (ce) ce.textContent = t || '';
   const el = $('#content');
   el.innerHTML = ({ home: viewHome, pipeline: viewPipeline, channels: viewChannels, perf: viewPerf, budget: viewBudget })[ui.view]();
-  const pw = $('#periodWrap'); if (pw){ pw.innerHTML = ui.view === 'budget' ? '' : periodSelect(); const ps = $('#period'); if (ps) ps.onchange = e => { ui.period = e.target.value; ui.colLimit = {}; ui.pLimit = 60; render(); }; }
+  const pw = $('#periodWrap'); if (pw){ pw.innerHTML = ui.view === 'budget' ? '' : periodSelect(); const ps = $('#period'); if (ps) ps.onchange = e => { ui.period = e.target.value; ui.colLimit = {}; ui.pLimit = 60; ui.rankAll = false; render(); }; }
   const by = $('#bYear'); if (by) by.onchange = e => { ui.bYear = +e.target.value; render(); };
   const po = $('#pOwner'); if (po) po.onchange = e => { ui.pOwner = e.target.value; ui.colLimit = {}; render(); };
   bindBoard();
@@ -914,7 +975,7 @@ document.addEventListener('click', async e => {
   if (t.tagName === 'A') e.preventDefault();
   const ds = t.dataset;
   if (ds.nav){ ui.view = ds.nav; closeDrawer(); render(); $('#content').scrollTop = 0; return; }
-  if (ds.brand){ ui.brand = ds.brand; ui.colLimit = {}; render(); return; }
+  if (ds.brand){ ui.brand = ds.brand; ui.colLimit = {}; ui.rankAll = false; render(); return; }
   if (ds.mine){ ui.mine = ds.mine === '1'; render(); return; }
   if (ds.tk){ ui.taskKind = ds.tk; render(); return; }
   if (ds.pm){ ui.pMode = ds.pm; render(); return; }
@@ -922,7 +983,7 @@ document.addEventListener('click', async e => {
   if (ds.chsort){ ui.chSort = ds.chsort; render(); return; }
   if (ds.stageSet){ ui.drawer.stage = ds.stageSet; document.querySelectorAll('[data-stage-set]').forEach(b => b.setAttribute('aria-pressed', b === t)); stageMsg(ds.stageSet); $('#dealForm').oninput(); return; }
   if (ds.bud){ openBudget(ds.bud); return; }
-  if (ds.psort){ ui.psort = ds.psort; render(); return; }
+  if (ds.psort){ ui.psort = ds.psort; ui.fullOpen = true; render(); return; }
   if (ds.merge){
     const src = ds.merge, b = ui.brand, others = productsOf(b).filter(x => x !== src);
     const target = (prompt(`"${src}"을(를) 어떤 제품명으로 합칠까요?\n${b} 제품: ${others.join(', ') || '(없음)'}`) || '').trim();
@@ -946,7 +1007,9 @@ document.addEventListener('click', async e => {
     case 'chmore': ui.chLimit += 300; render(); break;
     case 'export': exportXlsx(); break;
     case 'exportReport': exportReport(); break;
-    case 'pmore': ui.pLimit += 200; render(); break;
+    case 'pmore': ui.pLimit += 200; ui.fullOpen = true; render(); break;
+    case 'rankAll': ui.rankAll = !ui.rankAll; render(); break;
+    case 'toggleFull': e.preventDefault(); ui.fullOpen = !ui.fullOpen; render(); break;
     case 'unlockMerge': if (requireAdmin()){ toast(ui.brand === '전체' ? '위쪽에서 브랜드를 하나 고르면 합치기 버튼이 보여요' : '제품 옆 합치기 버튼을 누르세요'); render(); } break;
     case 'cleanContacts': {
       if (!requireAdmin()) break;
