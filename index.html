@@ -288,6 +288,16 @@ details.full summary::-webkit-details-marker{display:none}
 .va-link-needed{color:var(--orange)}
 @container (max-width:380px){.va-card{padding:10px}.va-head{align-items:flex-start}.va-metric dd{font-size:16px}.va-metric>div+div{padding-left:5px}}
 
+/* 완료된 영상의 분석 결과와 선택형 사진 보기 */
+.va-complete>strong{color:var(--green)}
+.va-insight-block+.va-insight-block{margin-top:8px}
+.va-insight-block h3{margin:3px 0 1px;font-size:13px;font-weight:650}
+.va-insight-block p,.va-scenes dd{overflow-wrap:anywhere}
+.va-root .va-scenes{margin-top:8px;border-top:1px solid var(--line);padding-top:4px;display:grid;gap:4px}
+.va-scenes>div{display:grid;grid-template-columns:minmax(55px,auto) minmax(0,1fr);gap:5px 8px}
+.va-scenes dt{font-size:11px;color:var(--muted);font-weight:620}.va-scenes dd{font-size:12px}
+.va-photo{margin-top:8px}.va-photo span{margin-left:6px}.va-photo img{display:block;max-width:100%;max-height:420px;object-fit:contain;margin-top:6px;border-radius:var(--r-ctl)}
+
 </style>
 </head>
 <body>
@@ -303,7 +313,7 @@ details.full summary::-webkit-details-marker{display:none}
    API_URL이 비어 있으면 "체험 모드"(이 브라우저에만 저장)로 동작합니다.
    ====================================================== */
 const CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/AKfycby-ZBzK4d0GsLhsaTyOpbEO4pnddeM2m282d7Sz45XQiCt1wqWA-PpR2FbQHoXZF58/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbxUuca0rSZaEDy9N3CwSev8VR3ecwUs19SSmuDOstUcKDPom0GhWSFTtyDvVDLnaiJz/exec',
   TEAM_CODE: 'demo-local-only',      // 체험 모드에서만 쓰는 접속 코드 (팀 모드에서는 Apps Script에서 확인)
   ADMIN_CODE: 'demo-local-admin-only',      // 체험 모드 예산 수정 코드
   YEAR: 2026,
@@ -359,6 +369,7 @@ function toast(msg, bad){ const t = $('#toast'); t.textContent = msg; t.classNam
 const NUMF = ['followers','v1','v2','v3','expected','cost','secondUse','incentive','views'];
 let DB = { channels: [], deals: [], budgets: {} };
 let CH = new Map();
+let vaAnalysisDb = new Map();
 const me = { name: ls.get('hub.me'), code: ls.get('hub.code') };
 const live = () => !!CONFIG.API_URL;
 
@@ -381,6 +392,7 @@ async function loadData(){
     const j = await r.json();
     if (!j.ok) throw new Error(j.error || 'load');
     DB = { channels: j.data.channels.map(normalize), deals: j.data.deals.map(normalize), budgets: {} };
+    vaAnalysisDb = vaIndexAnalyses(j.data.videoAnalyses);
     (j.data.budgets || []).forEach(b => DB.budgets[b.key] = toNum(b.amount) || 0);
   } else {
     const saved = ls.get('hub.db');
@@ -1003,6 +1015,60 @@ const vaViewLabel = n => n == null ? '미입력' : big(n);
 const vaCpvNum = n => n == null ? null : n.toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const vaCpvLabel = n => n == null ? '미입력' : vaCpvNum(n) + '원/회';
 const vaDateLabel = s => s || '업로드일 확인 필요';
+/* ---------- 시트에서 읽은 분석 결과 ---------- */
+function vaReelId(url){
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if (!/(^|\.)instagram\.com$/i.test(u.hostname)) return null;
+    return /(?:^|\/)(?:reel|reels|p|tv)\/([A-Za-z0-9_-]{5,40})(?:\/|$)/.exec(u.pathname)?.[1] || null;
+  } catch (_) { return null; }
+}
+function vaIndexAnalyses(rows){
+  const index = new Map();
+  if (Array.isArray(rows)) for (const row of rows){
+    if (row && typeof row.reelId === 'string' && /^[A-Za-z0-9_-]{5,40}$/.test(row.reelId)) index.set(row.reelId,row);
+  }
+  return index;
+}
+function vaPhotoUrl(value){
+  if (typeof value !== 'string' || !/^https:\/\/(?:[a-z0-9-]+\.)*(?:googleusercontent\.com|gstatic\.com|google\.com|googleapis\.com)\//i.test(value)) return null;
+  try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password ? u.href : null; }
+  catch (_) { return null; }
+}
+function vaResultBody(item){
+  const a = item.analysis;
+  if (!a){
+    const message = item.link ? '아직 이 영상의 분석 결과가 등록되지 않았어요.' : '협찬 데이터의 업로드 URL을 확인하면 이 영상을 분석할 수 있어요.';
+    return `<div class="va-result"><strong class="${item.link ? '' : 'va-link-needed'}">${esc(item.state)}</strong><p class="va-sub">${esc(message)}</p></div>`;
+  }
+  const sceneRows = [['첫 3초',a.hook],['제품 노출·사용',a.product],['마무리',a.ending]].filter(([,v]) => typeof v === 'string' && v.trim());
+  const copy = (label,value) => value ? `<div class="va-insight-block"><h3>${label}</h3><p>${esc(value)}</p></div>` : '';
+  return `<div class="va-result va-complete"><strong>분석 완료</strong>${copy('핵심 인사이트',a.insight)}${copy('참고할 캠페인',a.campaign)}${sceneRows.length ? `<dl class="va-scenes" aria-label="구간별 분석">${sceneRows.map(([k,v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : ''}
+  ${a.hasPhoto === true ? `<div id="va-photo" class="va-photo" data-va-reel="${esc(a.reelId)}"><button class="btn sm" type="button" data-act="va-photo" data-va-reel="${esc(a.reelId)}">구간 사진 보기</button><span class="va-sub" aria-live="polite" id="va-photo-note"></span></div>` : ''}</div>`;
+}
+async function vaShowPhoto(reelId, button){
+  const panel = $('#va-photo'), note = $('#va-photo-note');
+  if (!panel || !note || panel.dataset.vaReel !== reelId || !/^[A-Za-z0-9_-]{5,40}$/.test(reelId)) return;
+  button.disabled = true;
+  note.textContent = '사진을 불러오는 중이에요.';
+  try {
+    const result = await api('videoAnalysisPhoto', { reelId });
+    const url = vaPhotoUrl(result.photoUrl);
+    if (!url) throw new Error('invalid image URL');
+    if ($('#va-photo') !== panel) return;
+    const img = document.createElement('img');
+    img.alt = '이 릴스의 타임스탬프별 구간 캡처';
+    img.referrerPolicy = 'no-referrer';
+    img.onload = () => { note.textContent = ''; button.hidden = true; };
+    img.onerror = () => { img.remove(); note.textContent = '사진을 표시하지 못했어요. 버튼을 다시 눌러 주세요.'; button.disabled = false; };
+    panel.appendChild(img);
+    img.src = url;
+  } catch (_) {
+    if ($('#va-photo') === panel) { note.textContent = '사진을 불러오지 못했어요. 잠시 뒤 다시 눌러 주세요.'; button.disabled = false; }
+  }
+}
+
 function vaRows(){
   return DB.deals.filter(d => d.stage === '업로드').map(d => {
     const ch = chOf(d);
@@ -1013,10 +1079,11 @@ function vaRows(){
     const computedCpv = views != null && views > 0 ? dcpv(d) : null;
     const cpvValue = Number.isFinite(computedCpv) && computedCpv >= 0 ? computedCpv : null;
     const cost = totalCost(d);
-    return { d, ch, date, month: date ? date.slice(0,7) : 'unknown', link, views, cpv: cpvValue,
+    const analysis = vaAnalysisDb.get(vaReelId(link)) || null;
+    return { d, ch, date, analysis, month: date ? date.slice(0,7) : 'unknown', link, views, cpv: cpvValue,
       cost: Number.isFinite(cost) ? cost : null, id: String(d.id),
       brand: String(d.brand ?? '').trim() || '브랜드 미입력',
-      state: link ? '분석 대기' : supplied ? '링크 확인 필요' : '링크 필요' };
+      state: analysis ? '분석 완료' : link ? '분석 대기' : supplied ? '링크 확인 필요' : '링크 필요' };
   });
 }
 function vaRow(item, active, place){
@@ -1034,11 +1101,10 @@ function vaDetail(item){
   const details = [handle ? '@' + handle : '', Number.isFinite(item.ch.followers) ? '팔로워 ' + big(item.ch.followers) : '', item.date ? '업로드 ' + item.date : '업로드일 확인 필요'].filter(Boolean).join(' · ');
   const ext = (url, text) => `<a class="btn sm" data-ext href="${esc(url)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
   const links = [profile ? ext(profile, '계정 열기') : '', item.link ? ext(item.link, '원본 영상 보기') : ''].join('');
-  const stateNote = item.link ? '이 탭에서는 등록된 영상과 성과를 보여줘요. 영상 분석 결과와 구간 사진은 아직 연결되지 않았어요.' : '협찬 데이터의 업로드 URL을 확인하면 이 영상을 분석할 수 있어요.';
   return `<section class="va-card" id="va-detail" aria-labelledby="va-detail-title"><div class="va-sub">${esc(item.brand)} · 영상 상세</div><h2 class="va-detail-title" id="va-detail-title" tabindex="-1">${esc(title || '(채널 없음)')}</h2><p class="va-sub">${esc(details)}</p>${links ? `<div class="va-links">${links}</div>` : ''}
     <dl class="va-metric" aria-label="영상 성과"><div><dt>허브 조회수</dt><dd title="${esc(item.views == null ? '' : full(item.views) + '회')}">${esc(vaViewLabel(item.views))}${item.views == null ? '' : '<small> 회</small>'}</dd></div><div><dt>집행비</dt><dd title="${esc(item.cost == null ? '' : full(item.cost) + '원')}">${esc(item.cost == null ? '미입력' : won(item.cost))}</dd></div><div><dt>CPV</dt><dd>${item.cpv == null ? '미입력' : esc(vaCpvNum(item.cpv)) + '<small> 원/회</small>'}</dd></div></dl>
     <p class="va-sub va-help">CPV = (계약금 + 인센티브) ÷ 허브 조회수. 2차 활용비는 집행비에만 포함돼요.</p>
-    <div class="va-result"><strong class="${item.link ? '' : 'va-link-needed'}">${esc(item.state)}</strong><p class="va-sub">${esc(stateNote)}</p></div></section>`;
+    ${vaResultBody(item)}</section>`;
 }
 function viewVideoAnalysis(){
   const rows = vaRows();
@@ -1054,11 +1120,13 @@ function viewVideoAnalysis(){
   const byOrder = vaState.order === 'cpv' ? [...byViews].sort((a,b) => (a.cpv ?? Infinity) - (b.cpv ?? Infinity) || ranks.get(a.id) - ranks.get(b.id)) : byViews;
   const picked = shown.find(r => r.id === vaState.selected) || byViews[0] || shown[0] || null;
   vaState.selected = picked?.id ?? null;
-  const ready = shown.filter(r => r.link).length;
+  const completed = shown.filter(r => r.analysis).length;
+  const waiting = shown.filter(r => r.link && !r.analysis).length;
+  const linkNeeded = shown.length - completed - waiting;
   const options = (values, val, label) => values.map(k => `<option value="${esc(k)}" ${k === val ? 'selected' : ''}>${esc(label(k))}</option>`).join('');
   return `<div class="va-root"><div class="va-head"><div><h1>영상 분석</h1><p class="va-sub">업로드된 협찬 영상의 계정과 성과를 한곳에서 확인해요.</p></div>
     <div class="va-filters"><label for="va-month">업로드 월<select class="sel" id="va-month">${options(monthKeys,vaState.month,vaMonthLabel)}</select></label><label for="va-brand">영상 브랜드<select class="sel" id="va-brand">${options(brands,ui.brand,b => b)}</select></label></div></div>
-    <div class="va-statusline va-sub"><span><strong>업로드 ${full(shown.length)}건</strong></span><span>분석 대기 ${full(ready)}건</span><span>링크 필요·확인 ${full(shown.length-ready)}건</span>${vaState.month === thisMonth() ? '<span>이번 달 · 잠정 순위</span>' : ''}</div>
+    <div class="va-statusline va-sub"><span><strong>업로드 ${full(shown.length)}건</strong></span><span>분석 완료 ${full(completed)}건</span><span>분석 대기 ${full(waiting)}건</span><span>링크 필요·확인 ${full(linkNeeded)}건</span>${vaState.month === thisMonth() ? '<span>이번 달 · 잠정 순위</span>' : ''}</div>
     <div class="va-layout"><section class="va-card va-rank" aria-labelledby="va-rank-title"><div class="va-card-head"><h2 id="va-rank-title">조회수 상위 5개</h2><span class="va-sub">${esc(ui.brand === '전체' ? '전체 브랜드 통합' : ui.brand)}</span></div>
     <div class="va-sort" role="group" aria-label="상위 5개 정렬"><button type="button" class="btn sm" data-act="va-sort" data-va-order="views" aria-pressed="${vaState.order === 'views'}">조회수 순</button><button type="button" class="btn sm" data-act="va-sort" data-va-order="cpv" aria-pressed="${vaState.order === 'cpv'}">CPV 낮은 순</button></div>
     ${byOrder.length ? `<ol class="va-rows" id="va-top5">${byOrder.map(r => vaRow(r,r.id === vaState.selected,ranks.get(r.id))).join('')}</ol>` : '<p class="va-empty">이 조건에 조회수가 등록된 영상이 없어요.</p>'}<p class="va-sub va-help">허브 조회수로 선정한 후보만 다시 정렬해요. 순위 숫자는 조회수 기준이에요.</p></section>${vaDetail(picked)}</div>
@@ -1115,6 +1183,7 @@ document.addEventListener('click', async e => {
     vaState.order = ds.vaOrder === 'cpv' ? 'cpv' : 'views'; render();
     document.querySelector(`[data-va-order="${vaState.order}"]`)?.focus({preventScroll:true}); return;
   }
+  if (ds.act === 'va-photo' && ui.view === 'video'){ await vaShowPhoto(ds.vaReel, t); return; }
   if (ds.act === 'va-select' && ui.view === 'video'){
     vaState.selected = ds.vaId; render();
     const detail = $('#va-detail-title'); if (detail){ detail.focus({preventScroll:true}); detail.scrollIntoView({block:'nearest'}); } return;
