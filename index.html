@@ -304,7 +304,10 @@ details.full summary::-webkit-details-marker{display:none}
 .va-timing-card{margin-top:12px}.va-tgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;margin-top:6px}
 @container (min-width:700px){.va-tgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .va-tblock h3{font-size:13px;font-weight:620;margin:0 0 6px}.va-tblock h3 .va-sub{font-weight:400;margin-left:4px}
-.va-photo{margin-top:8px}.va-photo span{margin-left:6px}.va-photo img{display:block;max-width:100%;max-height:420px;object-fit:contain;margin-top:6px;border-radius:var(--r-ctl)}
+.va-photo{margin-top:8px}.va-zoomable{cursor:zoom-in}
+.va-zoom{position:fixed;inset:0;z-index:1000;background:rgba(10,10,12,.82);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:calc(env(safe-area-inset-top,0px) + 48px) 12px calc(env(safe-area-inset-bottom,0px) + 16px)}
+.va-zoom-box{max-width:min(1600px,100%)}.va-zoom-box img{display:block;width:100%;height:auto;border-radius:6px;cursor:zoom-out}
+.va-zoom-x{position:fixed;top:calc(env(safe-area-inset-top,0px) + 10px);right:12px;width:36px;height:36px;border-radius:50%;border:0;background:#fff;color:#111;font-size:16px;cursor:pointer}.va-photo span{margin-left:6px}.va-photo img{display:block;max-width:100%;max-height:420px;object-fit:contain;margin-top:6px;border-radius:var(--r-ctl)}
 
 </style>
 </head>
@@ -1100,7 +1103,21 @@ function vaResultBody(item){
     .filter(([,v]) => typeof v === 'string' && v.trim());
   const copy = (label,value) => value ? `<div class="va-insight-block"><h3>${label}</h3><p>${esc(value)}</p></div>` : '';
   return `<div class="va-result va-complete"><strong>분석 완료</strong>${copy('핵심 인사이트',a.insight)}${copy('참고할 캠페인',a.campaign)}${sceneRows.length ? `<dl class="va-scenes" aria-label="구간별 분석">${sceneRows.map(([k,v,t]) => `<div><dt>${k}${t != null ? `<span class="va-t">${vaSecTxt(t)}</span>` : ''}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : ''}${segs.length && segs.length !== 3 ? `<p class="va-sub va-help">구간 시간 ${segs.map(vaSecTxt).join(' · ')}</p>` : ''}
-  ${a.hasPhoto === true && !segs.length ? `<div id="va-photo" class="va-photo" data-va-reel="${esc(a.reelId)}"><button class="btn sm" type="button" data-act="va-photo" data-va-reel="${esc(a.reelId)}">구간 사진 보기</button><span class="va-sub" aria-live="polite" id="va-photo-note"></span></div>` : ''}</div>`;
+  ${a.hasPhoto === true ? `<div id="va-photo" class="va-photo" data-va-reel="${esc(a.reelId)}"><button class="btn sm" type="button" data-act="va-photo" data-va-reel="${esc(a.reelId)}">구간 사진 보기</button><span class="va-sub" aria-live="polite" id="va-photo-note"></span></div>` : ''}</div>`;
+}
+function vaZoom(url){
+  document.getElementById('va-zoom')?.remove();
+  const back = document.createElement('div');
+  back.id = 'va-zoom'; back.className = 'va-zoom'; back.setAttribute('role', 'dialog'); back.setAttribute('aria-label', '구간 사진 크게 보기');
+  back.innerHTML = '<button type="button" class="va-zoom-x" aria-label="닫기">✕</button><div class="va-zoom-box"><img alt="구간 사진 원본 크기"></div>';
+  back.querySelector('img').src = url;
+  const prevFocus = document.activeElement;
+  const close = () => { back.remove(); document.removeEventListener('keydown', onKey); prevFocus?.focus?.({ preventScroll: true }); };
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  back.addEventListener('click', e => { if (e.target === back || e.target.closest('.va-zoom-x')) close(); });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(back);
+  back.querySelector('.va-zoom-x').focus();
 }
 async function vaShowPhoto(reelId, button){
   const panel = $('#va-photo'), note = $('#va-photo-note');
@@ -1115,7 +1132,12 @@ async function vaShowPhoto(reelId, button){
     const img = document.createElement('img');
     img.alt = '이 릴스의 타임스탬프별 구간 캡처';
     img.referrerPolicy = 'no-referrer';
-    img.onload = () => { URL.revokeObjectURL(url); note.textContent = ''; button.hidden = true; };
+    img.title = '누르면 크게 보기';
+    img.tabIndex = 0;
+    img.className = 'va-zoomable';
+    img.onclick = () => vaZoom(url);
+    img.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); vaZoom(url); } };
+    img.onload = () => { note.textContent = '사진을 누르면 크게 볼 수 있어요.'; button.hidden = true; };
     img.onerror = () => { URL.revokeObjectURL(url); img.remove(); note.textContent = '사진을 표시하지 못했어요. 버튼을 다시 눌러 주세요.'; button.disabled = false; };
     panel.appendChild(img);
     img.src = url;
@@ -1315,7 +1337,7 @@ document.addEventListener('click', async e => {
 $('#scrim').onclick = closeDrawer;
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('kcard')){ openDeal(e.target.dataset.deal); return; }
-  if (e.key === 'Escape'){ if (!$('#modal').hidden) closeModal(); else if (ui.drawer) closeDrawer(); }
+  if (e.key === 'Escape'){ if (document.getElementById('va-zoom')) return; if (!$('#modal').hidden) closeModal(); else if (ui.drawer) closeDrawer(); }
   if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){ e.preventDefault(); const q = $('#q'); q && q.focus(); }
 });
 
