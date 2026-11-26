@@ -299,6 +299,11 @@ details.full summary::-webkit-details-marker{display:none}
 .va-root .va-scenes{margin-top:8px;border-top:1px solid var(--line);padding-top:4px;display:grid;gap:4px}
 .va-scenes>div{display:grid;grid-template-columns:minmax(55px,auto) minmax(0,1fr);gap:5px 8px}
 .va-scenes dt{font-size:11px;color:var(--muted);font-weight:620}.va-scenes dd{font-size:12px}
+.va-t{display:block;font-weight:500;font-variant-numeric:tabular-nums;color:var(--muted)}
+.va-timing{margin-top:6px}.va-timing b{font-weight:620;color:inherit;font-variant-numeric:tabular-nums}
+.va-timing-card{margin-top:12px}.va-tgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;margin-top:6px}
+@container (min-width:700px){.va-tgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.va-tblock h3{font-size:13px;font-weight:620;margin:0 0 6px}.va-tblock h3 .va-sub{font-weight:400;margin-left:4px}
 .va-photo{margin-top:8px}.va-photo span{margin-left:6px}.va-photo img{display:block;max-width:100%;max-height:420px;object-fit:contain;margin-top:6px;border-radius:var(--r-ctl)}
 
 </style>
@@ -1072,16 +1077,30 @@ function vaPhotoObjectUrl(result){
     return URL.createObjectURL(new Blob([bytes], {type:result.photoMime}));
   } catch (_) { return null; }
 }
+/* 구간 시간(N열) · 영상 길이(O열) · 제품 첫 등장(P열) */
+const vaPick = (a, keys) => { for (const k of keys) if (a && a[k] != null && String(a[k]).trim() !== '') return a[k]; return null; };
+function vaSecNum(v){ if (v == null) return null; const n = Number(String(v).replace(/[^\d.]/g, '')); return Number.isFinite(n) && n >= 0 && String(v).trim() !== '' ? n : null; }
+function vaSegTimes(a){
+  const raw = vaPick(a, ['segTimes', 'sceneTimes', 'times', '구간 시간', '구간시간']);
+  if (raw == null) return [];
+  return String(raw).split(/[,/·\s]+/).map(vaSecNum).filter(n => n != null);
+}
+const vaLenSec = a => vaSecNum(vaPick(a, ['videoSec', 'lengthSec', 'duration', '영상 길이(초)', '영상 길이']));
+const vaProdSec = a => vaSecNum(vaPick(a, ['productSec', 'productFirstSec', 'firstProduct', '제품 첫 등장(초)', '제품 첫 등장']));
+const vaSecTxt = n => n == null ? '' : (Number.isInteger(n) ? n : n.toFixed(1).replace(/\.0$/, '')) + '초';
 function vaResultBody(item){
   const a = item.analysis;
   if (!a){
     const message = item.link ? '아직 이 영상의 분석 결과가 등록되지 않았어요.' : '협찬 데이터의 업로드 URL을 확인하면 이 영상을 분석할 수 있어요.';
     return `<div class="va-result"><strong class="${item.link ? '' : 'va-link-needed'}">${esc(item.state)}</strong><p class="va-sub">${esc(message)}</p></div>`;
   }
-  const sceneRows = [['첫 3초',a.hook],['제품 노출·사용',a.product],['마무리',a.ending]].filter(([,v]) => typeof v === 'string' && v.trim());
+  const segs = vaSegTimes(a);
+  const sceneRows = [['첫 3초',a.hook],['제품 노출·사용',a.product],['마무리',a.ending]]
+    .map(([k,v],i) => [k, v, segs.length === 3 ? segs[i] : null])
+    .filter(([,v]) => typeof v === 'string' && v.trim());
   const copy = (label,value) => value ? `<div class="va-insight-block"><h3>${label}</h3><p>${esc(value)}</p></div>` : '';
-  return `<div class="va-result va-complete"><strong>분석 완료</strong>${copy('핵심 인사이트',a.insight)}${copy('참고할 캠페인',a.campaign)}${sceneRows.length ? `<dl class="va-scenes" aria-label="구간별 분석">${sceneRows.map(([k,v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : ''}
-  ${a.hasPhoto === true ? `<div id="va-photo" class="va-photo" data-va-reel="${esc(a.reelId)}"><button class="btn sm" type="button" data-act="va-photo" data-va-reel="${esc(a.reelId)}">구간 사진 보기</button><span class="va-sub" aria-live="polite" id="va-photo-note"></span></div>` : ''}</div>`;
+  return `<div class="va-result va-complete"><strong>분석 완료</strong>${copy('핵심 인사이트',a.insight)}${copy('참고할 캠페인',a.campaign)}${sceneRows.length ? `<dl class="va-scenes" aria-label="구간별 분석">${sceneRows.map(([k,v,t]) => `<div><dt>${k}${t != null ? `<span class="va-t">${vaSecTxt(t)}</span>` : ''}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : ''}${segs.length && segs.length !== 3 ? `<p class="va-sub va-help">구간 시간 ${segs.map(vaSecTxt).join(' · ')}</p>` : ''}
+  ${a.hasPhoto === true && !segs.length ? `<div id="va-photo" class="va-photo" data-va-reel="${esc(a.reelId)}"><button class="btn sm" type="button" data-act="va-photo" data-va-reel="${esc(a.reelId)}">구간 사진 보기</button><span class="va-sub" aria-live="polite" id="va-photo-note"></span></div>` : ''}</div>`;
 }
 async function vaShowPhoto(reelId, button){
   const panel = $('#va-photo'), note = $('#va-photo-note');
@@ -1139,8 +1158,23 @@ function vaDetail(item){
   const links = [profile ? ext(profile, '계정 열기') : '', item.link ? ext(item.link, '원본 영상 보기') : ''].join('');
   return `<section class="va-card" id="va-detail" aria-labelledby="va-detail-title"><div class="va-sub">${esc(item.brand)} · 영상 상세</div><h2 class="va-detail-title" id="va-detail-title" tabindex="-1">${esc(title || '(채널 없음)')}</h2><p class="va-sub">${esc(details)}</p>${links ? `<div class="va-links">${links}</div>` : ''}
     <dl class="va-metric" aria-label="영상 성과"><div><dt>허브 조회수</dt><dd title="${esc(item.views == null ? '' : full(item.views) + '회')}">${esc(vaViewLabel(item.views))}${item.views == null ? '' : '<small> 회</small>'}</dd></div><div><dt>집행비</dt><dd title="${esc(item.cost == null ? '' : full(item.cost) + '원')}">${esc(item.cost == null ? '미입력' : won(item.cost))}</dd></div><div><dt>CPV</dt><dd>${item.cpv == null ? '미입력' : esc(vaCpvNum(item.cpv)) + '<small> 원/회</small>'}</dd></div></dl>
+    ${(() => { const L = vaLenSec(item.analysis), P = vaProdSec(item.analysis); return L != null || P != null ? `<p class="va-sub va-timing">${[L != null ? '영상 길이 <b>' + vaSecTxt(L) + '</b>' : '', P != null ? '제품 첫 등장 <b>' + vaSecTxt(P) + '</b>' : ''].filter(Boolean).join(' · ')}</p>` : ''; })()}
     <p class="va-sub va-help">CPV = (계약금 + 인센티브) ÷ 허브 조회수. 2차 활용비는 집행비에만 포함돼요.</p>
     ${vaResultBody(item)}</section>`;
+}
+function vaTimingCard(rows){
+  const base = rows.filter(r => r.analysis && r.cpv != null);
+  const groups = [
+    ['영상 길이', r => vaLenSec(r.analysis), [['15초 이하', 0, 15], ['16~30초', 15.01, 30], ['31~60초', 30.01, 60], ['60초 초과', 60.01, 1e9]]],
+    ['제품 첫 등장', r => vaProdSec(r.analysis), [['3초 이내', 0, 3], ['3~10초', 3.01, 10], ['10초 이후', 10.01, 1e9]]]
+  ];
+  const blocks = groups.map(([title, get, bins]) => {
+    const has = base.filter(r => get(r) != null);
+    const st = bins.map(([l, lo, hi]) => { const ds = has.filter(r => get(r) >= lo && get(r) <= hi); return { l, n: ds.length, v: median(ds.map(r => r.cpv)) }; });
+    const max = Math.max(1, ...st.map(x => x.v || 0)) * 1.1;
+    return `<div class="va-tblock"><h3>${title} <span class="va-sub">${has.length}건 입력</span></h3>${has.length ? st.map(x => hbarRow(`${x.l} <span class="muted">${x.n}건</span>`, x.v, max, x.n >= 3 ? '#2a78d6' : '#9fc3ef', x.n ? cpvTxt(x.v) : '—')).join('') : '<p class="va-empty">아직 입력된 영상이 없어요.</p>'}</div>`;
+  }).join('');
+  return `<section class="va-card va-timing-card" aria-labelledby="va-timing-title"><div class="va-card-head"><h2 id="va-timing-title">길이·제품 등장 시점별 CPV</h2><span class="va-sub">분석 완료 ${full(base.length)}건 · CPV 중간값 · 짧을수록 좋음</span>${info('영상분석 탭의 영상 길이(초)·제품 첫 등장(초)이 입력된 영상만 계산해요. 흐린 막대는 3건 미만이라 참고만 하세요. 위의 월·브랜드 선택을 따라가요.')}</div>${base.length < 10 ? '<p class="va-sub va-help">표본이 10건 미만이라 경향만 보세요. 전체 기간을 고르면 표본이 늘어요.</p>' : ''}<div class="va-tgrid">${blocks}</div></section>`;
 }
 function viewVideoAnalysis(){
   const rows = vaRows();
@@ -1168,6 +1202,7 @@ function viewVideoAnalysis(){
     <div class="va-layout"><section class="va-card va-rank" aria-labelledby="va-rank-title"><div class="va-card-head"><h2 id="va-rank-title">${vaState.order === 'cpv' ? 'CPV 낮은 5개' : '조회수 상위 5개'}</h2><span class="va-sub">${esc(ui.brand === '전체' ? '전체 브랜드 통합' : ui.brand)}</span></div>
     <div class="va-sort" role="group" aria-label="상위 5개 정렬"><button type="button" class="btn sm" data-act="va-sort" data-va-order="views" aria-pressed="${vaState.order === 'views'}">조회수 순</button><button type="button" class="btn sm" data-act="va-sort" data-va-order="cpv" aria-pressed="${vaState.order === 'cpv'}">CPV 낮은 순</button></div>
     ${byOrder.length ? `<ol class="va-rows" id="va-top5">${byOrder.map(r => vaRow(r,r.id === vaState.selected,ranks.get(r.id))).join('')}</ol>` : '<p class="va-empty">이 조건에 조회수가 등록된 영상이 없어요.</p>'}<p class="va-sub va-help">${vaState.order === 'cpv' ? '이 기간 업로드 전체에서 CPV가 가장 낮은 5개예요.' : '이 기간 업로드 전체에서 조회수가 가장 높은 5개예요.'}</p></section>${vaDetail(picked)}</div>
+    ${vaTimingCard(shown)}
     <section class="va-card va-list" aria-labelledby="va-list-title"><div class="va-card-head"><h2 id="va-list-title">전체 업로드 영상</h2><span class="va-sub">${full(shown.length)}건 · 업로드일 최신순</span></div>${shown.length ? `<ul class="va-rows" id="va-all-uploads">${shown.map(r => vaRow(r,r.id === vaState.selected)).join('')}</ul>` : '<p class="va-empty">선택한 월·브랜드·검색어에 맞는 영상이 없어요.</p>'}</section></div>`;
 }
 function vaBind(){
